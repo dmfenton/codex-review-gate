@@ -1,7 +1,8 @@
 # Repository Instructions
 
-- Address every Codex review comment before merging any pull request, regardless of severity.
-- After every code or base-branch change, request a fresh Codex review for the exact pull-request head.
-- Merge only when the pinned Codex review gate and all repository checks pass.
-- Immediately before merging, query the pull request's live `reviewThreads` state and require zero unresolved Codex threads; a previously successful commit status is not enough.
+- Finish implementation and required checks before requesting one final `@codex review`.
+- Do not request another review for the same head and base unless the previous review reported substantive findings and those findings were fixed.
+- After any code or base-branch change, the existing review is stale; finish the new final state before requesting another review.
+- Merge only when the pinned `Codex review gate` status and all repository checks pass.
+- Immediately before merging, query the pull request's live `reviewThreads` state and require zero unresolved Codex threads.
 - Never dismiss, resolve, edit, or delete Codex feedback merely to make the gate pass; fix the underlying issue.
