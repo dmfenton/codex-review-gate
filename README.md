@@ -12,11 +12,12 @@ on the live pull-request head and succeeds only when all of these are true:
 
 The workflow does not poll, post comments, or redispatch itself. A base-branch
 push runs one shared invalidation job that marks existing PR-head statuses
-failed; it does not create per-PR workflow runs, and a newer base push cancels
-an older invalidation still in progress. Consumers audit on pull-request
+failed; it does not create per-PR workflow runs. Every gate job in a repository
+shares one non-cancelling concurrency group, so base invalidation cannot race a
+per-PR audit and leave a stale success published last. Consumers audit on pull-request
 head/base changes, authenticated Codex review activity, explicit `@codex review`
-comments, and optional manual dispatch. Job-level per-PR concurrency cancels
-only superseded eligible audits; ignored webhook activity cannot cancel one.
+comments, and optional manual dispatch. Ignored webhook activity never enters
+the serialized queue.
 Closing a pull request also runs the audit so its commit-scoped success is
 replaced with failure before the head SHA can be reused by another PR.
 

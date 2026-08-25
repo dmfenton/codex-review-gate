@@ -16,13 +16,13 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("issue_comment:", CALLER)
         self.assertNotIn("schedule:", CALLER)
 
-    def test_caller_serializes_each_pull_request(self) -> None:
+    def test_caller_serializes_all_gate_jobs_per_repository(self) -> None:
         job_start = CALLER.index("jobs:")
         concurrency_start = CALLER.index("concurrency:")
         self.assertGreater(concurrency_start, job_start)
-        self.assertIn("group: codex-review-gate-", CALLER)
-        self.assertIn("github.event_name == 'push' && 'base-main'", CALLER)
-        self.assertIn("cancel-in-progress: true", CALLER)
+        self.assertIn("group: codex-review-gate-${{ github.repository }}", CALLER)
+        self.assertIn("cancel-in-progress: false", CALLER)
+        self.assertNotIn("github.event_name == 'push' && 'base-main'", CALLER)
 
     def test_base_push_invalidates_without_redispatch(self) -> None:
         self.assertIn("invalidate-base:", GATE)
