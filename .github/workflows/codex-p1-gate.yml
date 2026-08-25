@@ -2,12 +2,8 @@ name: Codex review gate
 run-name: 'Codex review gate PR #${{ github.event.pull_request.number || github.event.issue.number || inputs.pr_number || 0 }}'
 
 on:
-  push:
-    branches: [main]
-  schedule:
-    - cron: '2-57/5 * * * *'
   pull_request_target:
-    types: [opened, reopened, synchronize, ready_for_review, edited, closed]
+    types: [opened, reopened, synchronize, ready_for_review, edited]
   pull_request_review:
     types: [submitted, edited, dismissed]
   pull_request_review_comment:
@@ -17,18 +13,36 @@ on:
   workflow_dispatch:
     inputs:
       pr_number:
+        description: Pull request number to audit
         required: true
         type: string
 
 permissions:
-  actions: write
   contents: read
-  issues: write
-  pull-requests: write
+  issues: read
+  pull-requests: read
   statuses: write
+
+concurrency:
+  group: codex-review-gate-${{ github.event.pull_request.number || github.event.issue.number || inputs.pr_number || github.run_id }}
+  cancel-in-progress: true
 
 jobs:
   enforce:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request_target' &&
+        (github.event.action != 'edited' || github.event.changes.base.ref)) ||
+      (github.event_name == 'pull_request_review' &&
+        contains(fromJSON('["chatgpt-codex-connector","chatgpt-codex-connector[bot]"]'), github.event.review.user.login)) ||
+      (github.event_name == 'pull_request_review_comment' &&
+        contains(fromJSON('["chatgpt-codex-connector","chatgpt-codex-connector[bot]"]'), github.event.comment.user.login)) ||
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request &&
+        (contains(fromJSON('["chatgpt-codex-connector","chatgpt-codex-connector[bot]"]'), github.event.comment.user.login) ||
+          (contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) &&
+            (contains(github.event.comment.body, '@codex review') ||
+              contains(github.event.changes.body.from, '@codex review')))))
     uses: ./.github/workflows/codex-review-gate.yml
     with:
-      pr_number: ${{ inputs.pr_number || '0' }}
+      pr_number: ${{ github.event.pull_request.number || github.event.issue.number || inputs.pr_number }}
+      runner_labels_json: '["ubuntu-latest"]'
