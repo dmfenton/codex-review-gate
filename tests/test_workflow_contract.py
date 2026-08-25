@@ -9,16 +9,24 @@ GATE = (ROOT / ".github/workflows/codex-review-gate.yml").read_text()
 
 class WorkflowContractTests(unittest.TestCase):
     def test_gate_remains_automatic_without_polling(self) -> None:
+        self.assertIn("push:\n    branches: [main]", CALLER)
         self.assertIn("pull_request_target:", CALLER)
         self.assertIn("pull_request_review:", CALLER)
         self.assertIn("issue_comment:", CALLER)
         self.assertNotIn("schedule:", CALLER)
-        self.assertNotIn("push:", CALLER)
 
     def test_caller_serializes_each_pull_request(self) -> None:
-        self.assertIn("concurrency:", CALLER)
+        job_start = CALLER.index("jobs:")
+        concurrency_start = CALLER.index("concurrency:")
+        self.assertGreater(concurrency_start, job_start)
         self.assertIn("group: codex-review-gate-", CALLER)
         self.assertIn("cancel-in-progress: true", CALLER)
+
+    def test_base_push_invalidates_without_redispatch(self) -> None:
+        self.assertIn("invalidate-base:", GATE)
+        self.assertIn("if: inputs.pr_number == '0'", GATE)
+        self.assertIn("Base advanced; fresh exact-head review required", GATE)
+        self.assertIn('[[ "$base_sha" == "$GITHUB_SHA" ]]', GATE)
 
     def test_gate_has_minimal_write_permission(self) -> None:
         self.assertIn("statuses: write", GATE)

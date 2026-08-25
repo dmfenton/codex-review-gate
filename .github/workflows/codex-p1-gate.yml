@@ -2,6 +2,8 @@ name: Codex review gate
 run-name: 'Codex review gate PR #${{ github.event.pull_request.number || github.event.issue.number || inputs.pr_number || 0 }}'
 
 on:
+  push:
+    branches: [main]
   pull_request_target:
     types: [opened, reopened, synchronize, ready_for_review, edited]
   pull_request_review:
@@ -23,13 +25,10 @@ permissions:
   pull-requests: read
   statuses: write
 
-concurrency:
-  group: codex-review-gate-${{ github.event.pull_request.number || github.event.issue.number || inputs.pr_number || github.run_id }}
-  cancel-in-progress: true
-
 jobs:
   enforce:
     if: >-
+      github.event_name == 'push' ||
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'pull_request_target' &&
         (github.event.action != 'edited' || github.event.changes.base.ref)) ||
@@ -42,7 +41,10 @@ jobs:
           (contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) &&
             (contains(github.event.comment.body, '@codex review') ||
               contains(github.event.changes.body.from, '@codex review')))))
+    concurrency:
+      group: codex-review-gate-${{ github.event.pull_request.number || github.event.issue.number || inputs.pr_number || github.run_id }}
+      cancel-in-progress: true
     uses: ./.github/workflows/codex-review-gate.yml
     with:
-      pr_number: ${{ github.event.pull_request.number || github.event.issue.number || inputs.pr_number }}
+      pr_number: ${{ github.event.pull_request.number || github.event.issue.number || inputs.pr_number || '0' }}
       runner_labels_json: '["ubuntu-latest"]'
