@@ -27,7 +27,7 @@ permissions:
 
 jobs:
   discover-base-prs:
-    if: inputs.pr_number == '0'
+    if: inputs.pr_number == '0' && github.event_name == 'push'
     runs-on: ${{ fromJSON(inputs.runner_labels_json) }}
     outputs:
       base_run_created_at: ${{ steps.discover.outputs.base_run_created_at }}
@@ -311,3 +311,107 @@ jobs:
           finalized=true
           printf '### Codex review gate: passed\n\n- PR: #%s\n- Head: %s\n- Base: %s\n- Unresolved Codex threads: 0\n' \
             "$PR_NUMBER" "$head_sha" "$base_sha" >> "$GITHUB_STEP_SUMMARY"
+
+  reconcile-threads:
+    if: inputs.pr_number == '0' && github.event_name != 'push'
+    concurrency:
+      group: codex-review-gate-${{ github.repository }}-thread-reconcile
+      cancel-in-progress: true
+    runs-on: ${{ fromJSON(inputs.runner_labels_json) }}
+    steps:
+      - name: Fail heads with unresolved Codex threads
+        env:
+          BASE_BRANCH: ${{ inputs.base_branch }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+
+          retry_api() {
+            local delay
+            for delay in 1 2 4 8 16; do
+              "$@" && return 0
+              sleep "$delay"
+            done
+            return 1
+          }
+
+          publish_failure() {
+            local head_sha="$1"
+            local description="$2"
+            local run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            retry_api gh api --method POST \
+              "repos/$GITHUB_REPOSITORY/statuses/$head_sha" \
+              -f state=failure \
+              -f context='Codex review gate' \
+              -f target_url="$run_url" \
+              -f description="$description" >/dev/null
+          }
+
+          pulls="$(retry_api gh api --paginate --slurp \
+            "repos/$GITHUB_REPOSITORY/pulls?state=open&base=$BASE_BRANCH&per_page=100")"
+          owner="${GITHUB_REPOSITORY%%/*}"
+          repository="${GITHUB_REPOSITORY#*/}"
+          failed=0
+          invalidated=0
+
+          while IFS=$'\t' read -r pr_number head_sha head_repository author; do
+            [[ -n "$pr_number" ]] || continue
+            [[ "$head_repository" == "$GITHUB_REPOSITORY" ]] || continue
+            [[ "$author" != 'dependabot[bot]' ]] || continue
+            [[ "$head_sha" =~ ^[0-9a-f]{40}$ ]] || continue
+
+            thread_data="$(retry_api gh api graphql \
+              -F owner="$owner" -F name="$repository" -F number="$pr_number" \
+              -f query="query(\$owner: String!, \$name: String!, \$number: Int!) {
+                repository(owner: \$owner, name: \$name) {
+                  pullRequest(number: \$number) {
+                    reviewThreads(first: 100) {
+                      pageInfo { hasNextPage }
+                      nodes {
+                        isResolved
+                        comments(first: 100) {
+                          pageInfo { hasNextPage }
+                          nodes { author { login } }
+                        }
+                      }
+                    }
+                  }
+                }
+              }")" || {
+                publish_failure "$head_sha" 'Thread reconciliation failed closed' || true
+                failed=1
+                continue
+              }
+
+            truncated="$(jq '
+              [.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage,
+               (.data.repository.pullRequest.reviewThreads.nodes[].comments.pageInfo.hasNextPage)]
+              | any
+            ' <<<"$thread_data")"
+            unresolved="$(jq '
+              [.data.repository.pullRequest.reviewThreads.nodes[]
+                | select(.isResolved | not)
+                | .comments.nodes[]
+                | select((.author.login // "") | IN("chatgpt-codex-connector", "chatgpt-codex-connector[bot]"))]
+              | length
+            ' <<<"$thread_data")"
+
+            if [[ "$truncated" != false ]]; then
+              publish_failure "$head_sha" 'Thread reconciliation exceeded audit limit'
+              invalidated=$((invalidated + 1))
+            elif (( unresolved > 0 )); then
+              publish_failure "$head_sha" 'Unresolved Codex review thread remains'
+              invalidated=$((invalidated + 1))
+            fi
+          done < <(jq -r '
+            add[]
+            | [.number, .head.sha, (.head.repo.full_name // ""), (.user.login // "")]
+            | @tsv
+          ' <<<"$pulls")
+
+          printf '### Codex thread reconciliation\n\nInvalidated PR heads: %s\n' \
+            "$invalidated" >> "$GITHUB_STEP_SUMMARY"
+          (( failed == 0 )) || {
+            echo '::error::One or more pull requests could not be reconciled.'
+            exit 1
+          }

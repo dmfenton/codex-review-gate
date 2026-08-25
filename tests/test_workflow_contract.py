@@ -8,13 +8,14 @@ GATE = (ROOT / ".github/workflows/codex-review-gate.yml").read_text()
 
 
 class WorkflowContractTests(unittest.TestCase):
-    def test_gate_remains_automatic_without_polling(self) -> None:
+    def test_gate_remains_automatic_with_hourly_thread_reconciliation(self) -> None:
+        self.assertIn("schedule:\n    - cron: '17 * * * *'", CALLER)
         self.assertIn("push:\n    branches: [main]", CALLER)
         self.assertIn("pull_request_target:", CALLER)
         self.assertIn("ready_for_review, edited, closed", CALLER)
         self.assertIn("pull_request_review:", CALLER)
         self.assertIn("issue_comment:", CALLER)
-        self.assertNotIn("schedule:", CALLER)
+        self.assertIn("github.event_name == 'schedule'", CALLER)
 
     def test_reusable_gate_serializes_per_pull_request(self) -> None:
         self.assertNotIn("concurrency:", CALLER)
@@ -44,6 +45,13 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertNotIn('/comments" -f body', GATE)
         self.assertNotIn("gh workflow run", GATE)
         self.assertNotIn("reconcile-open-pull-requests", GATE)
+
+    def test_hourly_reconciliation_only_fails_unresolved_threads(self) -> None:
+        self.assertIn("reconcile-threads:", GATE)
+        self.assertIn("github.event_name != 'push'", GATE)
+        self.assertIn("Unresolved Codex review thread remains", GATE)
+        reconcile = GATE[GATE.index("  reconcile-threads:") :]
+        self.assertNotIn("publish_status success", reconcile)
 
     def test_gate_runs_on_configurable_runner_pool(self) -> None:
         self.assertIn("runner_labels_json:", GATE)

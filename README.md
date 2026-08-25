@@ -10,7 +10,10 @@ on the live pull-request head and succeeds only when all of these are true:
 - the pull request head and base stay unchanged during the audit; and
 - live GraphQL `reviewThreads` contains no unresolved Codex thread.
 
-The workflow does not poll, post comments, or redispatch itself. A base-branch
+The workflow does not post comments or redispatch itself. An hourly self-hosted
+sentinel fails any PR head with a reopened or otherwise unresolved Codex thread;
+it never publishes success. This backstops GitHub Actions' lack of a review-thread
+resolution trigger without generating another Codex review. A base-branch
 push runs one shared discovery job and fans out invalidation jobs inside that
 workflow; it does not create per-PR workflow runs. Each invalidation shares a
 per-PR concurrency group with that PR's audits. A replacing audit revalidates
@@ -19,6 +22,8 @@ created after the base push. Consumers audit on pull-request
 head/base changes, authenticated Codex review activity, explicit `@codex review`
 comments, and optional manual dispatch. New eligible activity supersedes only
 older work for the same PR; ignored webhook activity never enters the queue.
+After legitimately resolving a fixed thread, manually dispatch the gate for the
+current PR instead of waiting for the hourly sentinel.
 Closing a pull request also runs the audit so its commit-scoped success is
 replaced with failure before the head SHA can be reused by another PR.
 
