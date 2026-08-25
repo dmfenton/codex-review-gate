@@ -46,6 +46,14 @@ class WorkflowContractTests(unittest.TestCase):
             GATE,
         )
 
+    def test_event_payload_is_read_from_file_without_argjson_round_trip(self) -> None:
+        self.assertNotIn('--argjson event "$event_data"', GATE)
+        self.assertNotIn('event_data="$(jq', GATE)
+        self.assertEqual(
+            GATE.count('--slurpfile event "$GITHUB_EVENT_PATH"'),
+            4,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
