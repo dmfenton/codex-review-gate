@@ -21,6 +21,7 @@ class WorkflowContractTests(unittest.TestCase):
         concurrency_start = CALLER.index("concurrency:")
         self.assertGreater(concurrency_start, job_start)
         self.assertIn("group: codex-review-gate-", CALLER)
+        self.assertIn("github.event_name == 'push' && 'base-main'", CALLER)
         self.assertIn("cancel-in-progress: true", CALLER)
 
     def test_base_push_invalidates_without_redispatch(self) -> None:
