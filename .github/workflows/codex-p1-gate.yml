@@ -4,6 +4,8 @@ run-name: 'Codex review gate PR #${{ github.event.pull_request.number || github.
 on:
   push:
     branches: [main]
+  schedule:
+    - cron: '2-57/5 * * * *'
   pull_request_target:
     types: [opened, reopened, synchronize, ready_for_review, edited, closed]
   pull_request_review:
