@@ -42,8 +42,8 @@ jobs:
             (contains(github.event.comment.body, '@codex review') ||
               contains(github.event.changes.body.from, '@codex review')))))
     concurrency:
-      group: codex-review-gate-${{ github.event_name == 'push' && 'base-main' || github.event.pull_request.number || github.event.issue.number || inputs.pr_number || github.run_id }}
-      cancel-in-progress: true
+      group: codex-review-gate-${{ github.repository }}
+      cancel-in-progress: false
     uses: ./.github/workflows/codex-review-gate.yml
     with:
       pr_number: ${{ github.event.pull_request.number || github.event.issue.number || inputs.pr_number || '0' }}
