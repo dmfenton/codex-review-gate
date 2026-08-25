@@ -25,7 +25,74 @@ permissions:
   statuses: write
 
 jobs:
+  invalidate-base:
+    if: inputs.pr_number == '0'
+    runs-on: ${{ fromJSON(inputs.runner_labels_json) }}
+    steps:
+      - name: Invalidate reviews created before the base push
+        env:
+          BASE_BRANCH: ${{ inputs.base_branch }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+
+          retry_api() {
+            local delay
+            for delay in 1 2 4 8 16; do
+              "$@" && return 0
+              sleep "$delay"
+            done
+            return 1
+          }
+
+          run_started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          pulls="$(retry_api gh api --paginate --slurp \
+            "repos/$GITHUB_REPOSITORY/pulls?state=open&base=$BASE_BRANCH&per_page=100")"
+          failed=0
+          invalidated=0
+
+          while IFS=$'\t' read -r pr_number head_sha base_sha head_repository author; do
+            [[ -n "$pr_number" ]] || continue
+            [[ "$head_repository" == "$GITHUB_REPOSITORY" ]] || continue
+            [[ "$author" != 'dependabot[bot]' ]] || continue
+            [[ "$head_sha" =~ ^[0-9a-f]{40}$ ]] || continue
+            [[ "$base_sha" == "$GITHUB_SHA" ]] || continue
+
+            latest_gate_at="$(retry_api gh api \
+              "repos/$GITHUB_REPOSITORY/commits/$head_sha/statuses?per_page=100" \
+              --jq '[.[] | select(.context == "Codex review gate")][0].created_at // ""')" || {
+                failed=1
+                continue
+              }
+            if [[ -n "$latest_gate_at" && ( "$latest_gate_at" > "$run_started_at" || "$latest_gate_at" == "$run_started_at" ) ]]; then
+              continue
+            fi
+
+            retry_api gh api --method POST \
+              "repos/$GITHUB_REPOSITORY/statuses/$head_sha" \
+              -f state=failure \
+              -f context='Codex review gate' \
+              -f target_url="$run_url" \
+              -f description='Base advanced; fresh exact-head review required' >/dev/null || {
+                failed=1
+                continue
+              }
+            invalidated=$((invalidated + 1))
+          done < <(jq -r '
+            add[]
+            | [.number, .head.sha, .base.sha, (.head.repo.full_name // ""), (.user.login // "")]
+            | @tsv
+          ' <<<"$pulls")
+
+          printf '### Codex base invalidation\n\nInvalidated PR heads: %s\n' "$invalidated" >> "$GITHUB_STEP_SUMMARY"
+          (( failed == 0 )) || {
+            echo '::error::One or more open PR heads could not be invalidated.'
+            exit 1
+          }
+
   audit:
+    if: inputs.pr_number != '0'
     runs-on: ${{ fromJSON(inputs.runner_labels_json) }}
     steps:
       - name: Audit exact-head Codex review

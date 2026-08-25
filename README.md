@@ -10,10 +10,12 @@ on the live pull-request head and succeeds only when all of these are true:
 - the pull request head and base stay unchanged during the audit; and
 - live GraphQL `reviewThreads` contains no unresolved Codex thread.
 
-The workflow does not poll, post comments, or redispatch itself. Consumers run it
-on pull-request head/base changes, authenticated Codex review activity, explicit
-`@codex review` comments, and optional manual dispatch. Per-PR concurrency
-cancels superseded audits.
+The workflow does not poll, post comments, or redispatch itself. A base-branch
+push runs one shared invalidation job that marks existing PR-head statuses
+failed; it does not create per-PR workflow runs. Consumers audit on pull-request
+head/base changes, authenticated Codex review activity, explicit `@codex review`
+comments, and optional manual dispatch. Job-level per-PR concurrency cancels
+only superseded eligible audits; ignored webhook activity cannot cancel one.
 
 Consumers keep a small event wrapper and pin the reusable workflow to a full
 commit SHA:
