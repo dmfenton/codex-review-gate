@@ -9,12 +9,13 @@ jobs:
   enforce:
     uses: dmfenton/codex-review-gate/.github/workflows/codex-review-gate.yml@<commit-sha>
     with:
-      pr_number: ${{ inputs.pr_number || 0 }}
+      pr_number: ${{ inputs.pr_number || '0' }}
 ```
 
 The caller must grant `actions: write`, `contents: read`, `issues: write`,
 `pull-requests: read`, and `statuses: write`. The caller file must remain named
 `.github/workflows/codex-p1-gate.yml` because the workflow redispatches that
-entrypoint when review state changes.
+entrypoint when review state changes. Its `workflow_dispatch.pr_number` input
+must be a string so redispatched PR numbers match the reusable boundary.
 
 Every consumer must pin a full commit SHA. Do not reference a mutable branch or tag.
