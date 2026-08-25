@@ -5,8 +5,8 @@ on:
     inputs:
       pr_number:
         required: false
-        type: number
-        default: 0
+        type: string
+        default: '0'
 permissions: {actions: write, contents: read, issues: write, pull-requests: read, statuses: write}
 jobs:
   invalidate-base-update:

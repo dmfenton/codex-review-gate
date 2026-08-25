@@ -9,7 +9,7 @@ jobs:
   enforce:
     uses: dmfenton/codex-review-gate/.github/workflows/codex-review-gate.yml@<commit-sha>
     with:
-      pr_number: ${{ inputs.pr_number || 0 }}
+      pr_number: ${{ inputs.pr_number || '0' }}
 ```
 
 The caller must grant `actions: write`, `contents: read`, `issues: write`,

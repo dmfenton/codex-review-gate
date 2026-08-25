@@ -29,5 +29,4 @@ jobs:
   enforce:
     uses: ./.github/workflows/codex-review-gate.yml
     with:
-      pr_number: ${{ inputs.pr_number || 0 }}
-
+      pr_number: ${{ inputs.pr_number || '0' }}
