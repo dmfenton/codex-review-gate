@@ -11,6 +11,7 @@ class WorkflowContractTests(unittest.TestCase):
     def test_gate_remains_automatic_without_polling(self) -> None:
         self.assertIn("push:\n    branches: [main]", CALLER)
         self.assertIn("pull_request_target:", CALLER)
+        self.assertIn("ready_for_review, edited, closed", CALLER)
         self.assertIn("pull_request_review:", CALLER)
         self.assertIn("issue_comment:", CALLER)
         self.assertNotIn("schedule:", CALLER)

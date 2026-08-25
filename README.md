@@ -16,6 +16,8 @@ failed; it does not create per-PR workflow runs. Consumers audit on pull-request
 head/base changes, authenticated Codex review activity, explicit `@codex review`
 comments, and optional manual dispatch. Job-level per-PR concurrency cancels
 only superseded eligible audits; ignored webhook activity cannot cancel one.
+Closing a pull request also runs the audit so its commit-scoped success is
+replaced with failure before the head SHA can be reused by another PR.
 
 Consumers keep a small event wrapper and pin the reusable workflow to a full
 commit SHA:
