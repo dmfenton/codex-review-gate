@@ -53,6 +53,11 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("unresolved Codex review thread", GATE)
         self.assertIn("The base branch advanced after the latest Codex review", GATE)
 
+    def test_gate_streams_unbounded_review_records(self) -> None:
+        self.assertIn("| jq -cs", GATE)
+        self.assertNotIn('--argjson issues "$issue_pages"', GATE)
+        self.assertNotIn('--argjson reviews "$review_pages"', GATE)
+
     def test_gate_publishes_stable_commit_status(self) -> None:
         self.assertIn("statuses/$head_sha", GATE)
         self.assertIn("context='Codex review gate'", GATE)
