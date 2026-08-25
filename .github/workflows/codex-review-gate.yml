@@ -19,17 +19,22 @@ on:
         default: main
 
 permissions:
+  actions: read
   contents: read
   issues: read
   pull-requests: read
   statuses: write
 
 jobs:
-  invalidate-base:
+  discover-base-prs:
     if: inputs.pr_number == '0'
     runs-on: ${{ fromJSON(inputs.runner_labels_json) }}
+    outputs:
+      base_run_created_at: ${{ steps.discover.outputs.base_run_created_at }}
+      pr_numbers: ${{ steps.discover.outputs.pr_numbers }}
     steps:
-      - name: Invalidate reviews created before the base push
+      - id: discover
+        name: Discover open pull requests
         env:
           BASE_BRANCH: ${{ inputs.base_branch }}
           GH_TOKEN: ${{ github.token }}
@@ -45,54 +50,94 @@ jobs:
             return 1
           }
 
-          run_started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          base_run_created_at="$(retry_api gh api \
+            "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq .created_at)"
           pulls="$(retry_api gh api --paginate --slurp \
             "repos/$GITHUB_REPOSITORY/pulls?state=open&base=$BASE_BRANCH&per_page=100")"
-          failed=0
-          invalidated=0
+          pr_numbers="$(jq -c --arg repository "$GITHUB_REPOSITORY" '
+            [add[]
+              | select((.head.repo.full_name // "") == $repository)
+              | select((.user.login // "") != "dependabot[bot]")
+              | .number]
+            | unique
+          ' <<<"$pulls")"
+          printf 'base_run_created_at=%s\n' "$base_run_created_at" >> "$GITHUB_OUTPUT"
+          printf 'pr_numbers=%s\n' "$pr_numbers" >> "$GITHUB_OUTPUT"
+          printf '### Codex base discovery\n\nOpen PRs: %s\n' "$(jq length <<<"$pr_numbers")" >> "$GITHUB_STEP_SUMMARY"
 
-          while IFS=$'\t' read -r pr_number head_sha base_sha head_repository author; do
-            [[ -n "$pr_number" ]] || continue
-            [[ "$head_repository" == "$GITHUB_REPOSITORY" ]] || continue
-            [[ "$author" != 'dependabot[bot]' ]] || continue
-            [[ "$head_sha" =~ ^[0-9a-f]{40}$ ]] || continue
-            [[ "$base_sha" == "$GITHUB_SHA" ]] || continue
+  invalidate-base:
+    needs: discover-base-prs
+    if: inputs.pr_number == '0' && needs.discover-base-prs.outputs.pr_numbers != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        pr_number: ${{ fromJSON(needs.discover-base-prs.outputs.pr_numbers) }}
+    concurrency:
+      group: codex-review-gate-${{ github.repository }}-pr-${{ matrix.pr_number }}
+      cancel-in-progress: true
+    runs-on: ${{ fromJSON(inputs.runner_labels_json) }}
+    steps:
+      - name: Invalidate review created before the base push
+        env:
+          BASE_BRANCH: ${{ inputs.base_branch }}
+          BASE_RUN_CREATED_AT: ${{ needs.discover-base-prs.outputs.base_run_created_at }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ matrix.pr_number }}
+        run: |
+          set -Eeuo pipefail
 
-            latest_gate_at="$(retry_api gh api \
-              "repos/$GITHUB_REPOSITORY/commits/$head_sha/statuses?per_page=100" \
-              --jq '[.[] | select(.context == "Codex review gate")][0].created_at // ""')" || {
-                failed=1
-                continue
-              }
-            if [[ -n "$latest_gate_at" && ( "$latest_gate_at" > "$run_started_at" || "$latest_gate_at" == "$run_started_at" ) ]]; then
-              continue
-            fi
-
-            retry_api gh api --method POST \
-              "repos/$GITHUB_REPOSITORY/statuses/$head_sha" \
-              -f state=failure \
-              -f context='Codex review gate' \
-              -f target_url="$run_url" \
-              -f description='Base advanced; fresh exact-head review required' >/dev/null || {
-                failed=1
-                continue
-              }
-            invalidated=$((invalidated + 1))
-          done < <(jq -r '
-            add[]
-            | [.number, .head.sha, .base.sha, (.head.repo.full_name // ""), (.user.login // "")]
-            | @tsv
-          ' <<<"$pulls")
-
-          printf '### Codex base invalidation\n\nInvalidated PR heads: %s\n' "$invalidated" >> "$GITHUB_STEP_SUMMARY"
-          (( failed == 0 )) || {
-            echo '::error::One or more open PR heads could not be invalidated.'
-            exit 1
+          retry_api() {
+            local delay
+            for delay in 1 2 4 8 16; do
+              "$@" && return 0
+              sleep "$delay"
+            done
+            return 1
           }
+
+          pr_data="$(retry_api gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER")"
+          head_sha="$(jq -r '.head.sha // ""' <<<"$pr_data")"
+          head_repository="$(jq -r '.head.repo.full_name // ""' <<<"$pr_data")"
+          pr_state="$(jq -r '.state // ""' <<<"$pr_data")"
+          pr_base="$(jq -r '.base.ref // ""' <<<"$pr_data")"
+          pr_author="$(jq -r '.user.login // ""' <<<"$pr_data")"
+
+          [[ "$head_sha" =~ ^[0-9a-f]{40}$ ]] || exit 0
+          [[ "$head_repository" == "$GITHUB_REPOSITORY" ]] || exit 0
+          [[ "$pr_state" == open && "$pr_base" == "$BASE_BRANCH" ]] || exit 0
+          [[ "$pr_author" != 'dependabot[bot]' ]] || exit 0
+
+          gate_status="$(retry_api gh api \
+            "repos/$GITHUB_REPOSITORY/commits/$head_sha/statuses?per_page=100" \
+            --jq '[.[] | select(.context == "Codex review gate")][0] // {}')"
+          gate_run_id="$(jq -r '.target_url // "" | capture("/actions/runs/(?<id>[0-9]+)").id // ""' \
+            <<<"$gate_status" 2>/dev/null || true)"
+          if [[ "$gate_run_id" =~ ^[0-9]+$ ]]; then
+            gate_run_created_at="$(retry_api gh api \
+              "repos/$GITHUB_REPOSITORY/actions/runs/$gate_run_id" --jq .created_at 2>/dev/null || true)"
+            if [[ -n "$gate_run_created_at" && \
+              ( "$gate_run_created_at" > "$BASE_RUN_CREATED_AT" || "$gate_run_created_at" == "$BASE_RUN_CREATED_AT" ) ]]; then
+              printf '### Codex base invalidation\n\nPR #%s already has a newer gate result.\n' \
+                "$PR_NUMBER" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+          fi
+
+          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          retry_api gh api --method POST \
+            "repos/$GITHUB_REPOSITORY/statuses/$head_sha" \
+            -f state=failure \
+            -f context='Codex review gate' \
+            -f target_url="$run_url" \
+            -f description='Base advanced; fresh exact-head review required' >/dev/null
+          printf '### Codex base invalidation\n\nInvalidated PR #%s at %s.\n' \
+            "$PR_NUMBER" "$head_sha" >> "$GITHUB_STEP_SUMMARY"
 
   audit:
     if: inputs.pr_number != '0'
+    concurrency:
+      group: codex-review-gate-${{ github.repository }}-pr-${{ inputs.pr_number }}
+      cancel-in-progress: true
     runs-on: ${{ fromJSON(inputs.runner_labels_json) }}
     steps:
       - name: Audit exact-head Codex review

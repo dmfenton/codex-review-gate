@@ -11,13 +11,14 @@ on the live pull-request head and succeeds only when all of these are true:
 - live GraphQL `reviewThreads` contains no unresolved Codex thread.
 
 The workflow does not poll, post comments, or redispatch itself. A base-branch
-push runs one shared invalidation job that marks existing PR-head statuses
-failed; it does not create per-PR workflow runs. Every gate job in a repository
-shares one non-cancelling concurrency group, so base invalidation cannot race a
-per-PR audit and leave a stale success published last. Consumers audit on pull-request
+push runs one shared discovery job and fans out invalidation jobs inside that
+workflow; it does not create per-PR workflow runs. Each invalidation shares a
+per-PR concurrency group with that PR's audits. A replacing audit revalidates
+the live base, while a delayed invalidation preserves gate results from runs
+created after the base push. Consumers audit on pull-request
 head/base changes, authenticated Codex review activity, explicit `@codex review`
-comments, and optional manual dispatch. Ignored webhook activity never enters
-the serialized queue.
+comments, and optional manual dispatch. New eligible activity supersedes only
+older work for the same PR; ignored webhook activity never enters the queue.
 Closing a pull request also runs the audit so its commit-scoped success is
 replaced with failure before the head SHA can be reused by another PR.
 
@@ -26,6 +27,7 @@ commit SHA:
 
 ```yaml
 permissions:
+  actions: read
   contents: read
   issues: read
   pull-requests: read

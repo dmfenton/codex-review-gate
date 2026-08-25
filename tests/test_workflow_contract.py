@@ -16,22 +16,24 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("issue_comment:", CALLER)
         self.assertNotIn("schedule:", CALLER)
 
-    def test_caller_serializes_all_gate_jobs_per_repository(self) -> None:
-        job_start = CALLER.index("jobs:")
-        concurrency_start = CALLER.index("concurrency:")
-        self.assertGreater(concurrency_start, job_start)
-        self.assertIn("group: codex-review-gate-${{ github.repository }}", CALLER)
-        self.assertIn("cancel-in-progress: false", CALLER)
-        self.assertNotIn("github.event_name == 'push' && 'base-main'", CALLER)
+    def test_reusable_gate_serializes_per_pull_request(self) -> None:
+        self.assertNotIn("concurrency:", CALLER)
+        self.assertIn("discover-base-prs:", GATE)
+        self.assertIn("matrix:\n        pr_number:", GATE)
+        self.assertIn("group: codex-review-gate-${{ github.repository }}-pr-", GATE)
+        self.assertIn("cancel-in-progress: true", GATE)
 
     def test_base_push_invalidates_without_redispatch(self) -> None:
         self.assertIn("invalidate-base:", GATE)
-        self.assertIn("if: inputs.pr_number == '0'", GATE)
+        self.assertIn("needs: discover-base-prs", GATE)
         self.assertIn("Base advanced; fresh exact-head review required", GATE)
-        self.assertIn('[[ "$base_sha" == "$GITHUB_SHA" ]]', GATE)
+        self.assertIn("BASE_RUN_CREATED_AT", GATE)
+        self.assertIn("gate_run_created_at", GATE)
 
     def test_gate_has_minimal_write_permission(self) -> None:
         self.assertIn("statuses: write", GATE)
+        self.assertIn("actions: read", GATE)
+        self.assertIn("actions: read", CALLER)
         self.assertIn("issues: read", GATE)
         self.assertIn("pull-requests: read", GATE)
         self.assertNotIn("issues: write", GATE)
