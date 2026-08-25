@@ -7,7 +7,7 @@ on:
         required: false
         type: string
         default: '0'
-permissions: {actions: write, contents: read, issues: write, pull-requests: read, statuses: write}
+permissions: {actions: write, contents: read, issues: write, pull-requests: write, statuses: write}
 jobs:
   reconcile-open-pull-requests:
     if: github.event_name == 'schedule'

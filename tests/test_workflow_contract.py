@@ -10,6 +10,8 @@ GATE = (ROOT / ".github/workflows/codex-review-gate.yml").read_text()
 class WorkflowContractTests(unittest.TestCase):
     def test_caller_polls_for_unobservable_thread_state_changes(self) -> None:
         self.assertIn("schedule:\n    - cron: '2-57/5 * * * *'", CALLER)
+        self.assertIn("pull-requests: write", CALLER)
+        self.assertIn("pull-requests: write", GATE)
         self.assertIn("github.event_name != 'schedule'", GATE)
         self.assertIn("reconcile-open-pull-requests:", GATE)
 

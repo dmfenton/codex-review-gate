@@ -13,7 +13,7 @@ jobs:
 ```
 
 The caller must grant `actions: write`, `contents: read`, `issues: write`,
-`pull-requests: read`, and `statuses: write`. The caller file must remain named
+`pull-requests: write`, and `statuses: write`. The caller file must remain named
 `.github/workflows/codex-p1-gate.yml` because the workflow redispatches that
 entrypoint when review state changes. Its `workflow_dispatch.pr_number` input
 must be a string so redispatched PR numbers match the reusable boundary.
