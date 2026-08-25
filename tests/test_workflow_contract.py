@@ -33,6 +33,19 @@ class WorkflowContractTests(unittest.TestCase):
         repository_check = GATE.index('commits/$rejected_head')
         self.assertLess(status_attempt, repository_check)
 
+    def test_redispatches_name_the_repository_without_a_checkout(self) -> None:
+        redispatches = [line for line in GATE.splitlines() if "gh workflow run" in line]
+        self.assertEqual(len(redispatches), 4)
+        self.assertTrue(
+            all('--repo "$GITHUB_REPOSITORY"' in line for line in redispatches)
+        )
+
+    def test_connector_setup_notice_is_not_treated_as_review_feedback(self) -> None:
+        self.assertIn(
+            '^To.use.Codex.here,.*connect.to.github',
+            GATE,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
