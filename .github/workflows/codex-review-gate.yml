@@ -176,9 +176,10 @@ jobs:
             fail_gate 'Pull request reviews could not be read.'
 
           # shellcheck disable=SC2016
-          codex_reviews="$(jq -cn \
-            --argjson issues "$issue_pages" \
-            --argjson reviews "$review_pages" '
+          codex_reviews="$(printf '%s\n%s\n' "$issue_pages" "$review_pages" | jq -cs '
+              .[0] as $issues
+              | .[1] as $reviews
+              |
               [
                 ($issues | add[]? | {
                   id, body: (.body // ""), occurred_at: (.created_at // ""),
