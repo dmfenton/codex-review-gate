@@ -1,0 +1,33 @@
+name: Codex review gate
+run-name: 'Codex review gate PR #${{ github.event.pull_request.number || github.event.issue.number || inputs.pr_number || 0 }}'
+
+on:
+  push:
+    branches: [main]
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review, edited, closed]
+  pull_request_review:
+    types: [submitted, edited, dismissed]
+  pull_request_review_comment:
+    types: [created, edited, deleted]
+  issue_comment:
+    types: [created, edited, deleted]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        required: true
+        type: number
+
+permissions:
+  actions: write
+  contents: read
+  issues: write
+  pull-requests: read
+  statuses: write
+
+jobs:
+  enforce:
+    uses: ./.github/workflows/codex-review-gate.yml
+    with:
+      pr_number: ${{ inputs.pr_number || 0 }}
+
