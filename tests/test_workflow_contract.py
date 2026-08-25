@@ -40,6 +40,12 @@ class WorkflowContractTests(unittest.TestCase):
             all('--repo "$GITHUB_REPOSITORY"' in line for line in redispatches)
         )
 
+    def test_connector_setup_notice_is_not_treated_as_review_feedback(self) -> None:
+        self.assertIn(
+            '^To.use.Codex.here,.*connect.to.github',
+            GATE,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

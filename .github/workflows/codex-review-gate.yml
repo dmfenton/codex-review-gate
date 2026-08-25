@@ -185,6 +185,10 @@ jobs:
           set -euo pipefail
           body="$(jq -r '.comment.body // ""' "$GITHUB_EVENT_PATH")"
           comment_id="$(jq -r '.comment.id // 0' "$GITHUB_EVENT_PATH")"
+          if [[ "$COMMENT_ACTION" == created \
+            && "$body" =~ ^To.use.Codex.here,.*connect.to.github ]]; then
+            exit 0
+          fi
           if [[ "$COMMENT_ACTION" != created \
             || ! "$body" =~ Codex.Review:.Didn.t.find.any.major.issues ]]; then
             gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body="<!-- codex-feedback-invalidation:$HEAD_SHA:$BASE_SHA:$comment_id:$COMMENT_ACTION:$GITHUB_RUN_ID --> Codex feedback changed; a fresh @codex review is required."
