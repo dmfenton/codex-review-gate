@@ -1,5 +1,7 @@
-from pathlib import Path
+import json
+import subprocess
 import unittest
+from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -75,6 +77,34 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn(
             "Here are some automated review suggestions for this pull request", GATE
         )
+
+    def test_paginated_inline_comments_are_flattened_before_review_filtering(self) -> None:
+        pages = [
+            [{"pull_request_review_id": 41, "user": {"login": "someone"}}],
+            [
+                {
+                    "pull_request_review_id": 42,
+                    "user": {"login": "chatgpt-codex-connector[bot]"},
+                }
+            ],
+        ]
+        program = """
+          [add[]?
+            | select(.pull_request_review_id == $review_id)
+            | select((.user.login // "")
+              | IN("chatgpt-codex-connector", "chatgpt-codex-connector[bot]"))]
+          | length
+        """
+
+        result = subprocess.run(
+            ["jq", "--argjson", "review_id", "42", program],
+            input=json.dumps(pages),
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+
+        self.assertEqual("1", result.stdout.strip())
 
     def test_gate_publishes_stable_commit_status(self) -> None:
         self.assertIn("statuses/$head_sha", GATE)
