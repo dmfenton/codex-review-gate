@@ -247,7 +247,7 @@ jobs:
           [[ -n "$latest_review" ]] || fail_gate 'No completed Codex review exists for this pull request.'
 
           latest_review_id="$(jq -r '.id' <<<"$latest_review")"
-          inline_findings="$(jq -s --argjson review_id "$latest_review_id" '
+          inline_findings="$(jq --argjson review_id "$latest_review_id" '
             [add[]?
               | select(.pull_request_review_id == $review_id)
               | select((.user.login // "") | IN("chatgpt-codex-connector", "chatgpt-codex-connector[bot]"))]
