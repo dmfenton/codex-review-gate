@@ -219,6 +219,9 @@ jobs:
           review_pages="$(retry_api gh api --paginate --slurp \
             "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews?per_page=100")" || \
             fail_gate 'Pull request reviews could not be read.'
+          review_comment_pages="$(retry_api gh api --paginate --slurp \
+            "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/comments?per_page=100")" || \
+            fail_gate 'Pull request review comments could not be read.'
 
           # shellcheck disable=SC2016
           codex_reviews="$(printf '%s\n%s\n' "$issue_pages" "$review_pages" | jq -cs '
@@ -228,22 +231,33 @@ jobs:
               [
                 ($issues | add[]? | {
                   id, body: (.body // ""), occurred_at: (.created_at // ""),
-                  commit_id: "", login: (.user.login // "")
+                  commit_id: "", login: (.user.login // ""), kind: "issue"
                 }),
                 ($reviews | add[]? | {
                   id, body: (.body // ""), occurred_at: (.submitted_at // ""),
-                  commit_id: (.commit_id // ""), login: (.user.login // "")
+                  commit_id: (.commit_id // ""), login: (.user.login // ""), kind: "review"
                 })
               ]
               | map(select(.login | IN("chatgpt-codex-connector", "chatgpt-codex-connector[bot]")))
-              | map(select(.body | test("Codex Review:"; "i")))
+              | map(select(.body | test("Codex Review"; "i")))
               | sort_by(.occurred_at, .id)
             ')" || fail_gate 'Codex review records could not be normalized.'
 
           latest_review="$(jq -c 'last // empty' <<<"$codex_reviews")"
           [[ -n "$latest_review" ]] || fail_gate 'No completed Codex review exists for this pull request.'
 
-          clean_review="$(jq -r '.body | test("Codex Review: Didn.t find any major issues"; "i")' <<<"$latest_review")"
+          latest_review_id="$(jq -r '.id' <<<"$latest_review")"
+          inline_findings="$(jq -s --argjson review_id "$latest_review_id" '
+            [add[]?
+              | select(.pull_request_review_id == $review_id)
+              | select((.user.login // "") | IN("chatgpt-codex-connector", "chatgpt-codex-connector[bot]"))]
+            | length
+          ' <<<"$review_comment_pages")" || fail_gate 'Codex inline review comments could not be normalized.'
+          clean_review="$(jq -r --argjson inline_findings "$inline_findings" '
+            (.body | test("Codex Review: Didn.t find any major issues"; "i")) or
+            (.kind == "review" and $inline_findings == 0 and
+              (.body | test("Here are some automated review suggestions for this pull request"; "i")))
+          ' <<<"$latest_review")"
           [[ "$clean_review" == true ]] || fail_gate 'The latest Codex review contains findings.'
 
           reviewed_ref="$(jq -r '

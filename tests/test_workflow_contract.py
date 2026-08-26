@@ -65,8 +65,16 @@ class WorkflowContractTests(unittest.TestCase):
 
     def test_gate_streams_unbounded_review_records(self) -> None:
         self.assertIn("| jq -cs", GATE)
+        self.assertIn("pulls/$PR_NUMBER/comments?per_page=100", GATE)
         self.assertNotIn('--argjson issues "$issue_pages"', GATE)
         self.assertNotIn('--argjson reviews "$review_pages"', GATE)
+
+    def test_gate_accepts_new_clean_review_shape_only_without_inline_findings(self) -> None:
+        self.assertIn("pull_request_review_id == $review_id", GATE)
+        self.assertIn("$inline_findings == 0", GATE)
+        self.assertIn(
+            "Here are some automated review suggestions for this pull request", GATE
+        )
 
     def test_gate_publishes_stable_commit_status(self) -> None:
         self.assertIn("statuses/$head_sha", GATE)
