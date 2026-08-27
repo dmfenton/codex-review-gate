@@ -56,7 +56,6 @@ jobs:
     with:
       pr_number: ${{ github.event.pull_request.number || github.event.issue.number || inputs.pr_number }}
       runner_labels_json: '["self-hosted","lilserver"]'
-      max_review_rounds: 2
 ```
 
 Every consumer must pin a full commit SHA. Do not reference a mutable branch or

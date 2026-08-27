@@ -66,8 +66,8 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("The base branch advanced after the latest Codex review", GATE)
 
     def test_gate_caps_review_rounds_with_bounded_remediation(self) -> None:
-        self.assertIn("max_review_rounds:", GATE)
-        self.assertIn("default: 2", GATE)
+        self.assertNotIn("max_review_rounds:", GATE)
+        self.assertIn("MAX_REVIEW_ROUNDS: 2", GATE)
         self.assertIn("review_rounds=\"$(jq 'length'", GATE)
         self.assertIn("review_rounds <= MAX_REVIEW_ROUNDS", GATE)
         self.assertIn("review_rounds == MAX_REVIEW_ROUNDS", GATE)
