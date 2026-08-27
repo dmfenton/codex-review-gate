@@ -6,6 +6,8 @@ The gate remains automatic. It publishes the `Codex review gate` commit status
 on the live pull-request head and succeeds only when all of these are true:
 
 - the latest Codex review is clean and covers the exact current head SHA;
+- or, after the second and final review reports findings, the current head is a
+  descendant that addresses them and all Codex threads are resolved;
 - the review happened after the current base commit;
 - the pull request head and base stay unchanged during the audit; and
 - live GraphQL `reviewThreads` contains no unresolved Codex thread.
@@ -26,6 +28,16 @@ After legitimately resolving a fixed thread, manually dispatch the gate for the
 current PR instead of waiting for the hourly sentinel.
 Closing a pull request also runs the audit so its commit-scoped success is
 replaced with failure before the head SHA can be reused by another PR.
+
+Review work is capped at two Codex rounds. Request the first review only after
+implementation and checks are complete. If it reports findings, address all of
+them together and request one final review. If that final review finds more,
+address those findings, resolve the corresponding threads, rerun the repository
+checks, and manually dispatch the gate without requesting a third review. The
+gate accepts that final remediation only when the reviewed commit is an ancestor
+of the current head and no Codex thread remains unresolved. A clean review never
+authorizes later unreviewed changes. More than two completed Codex reviews fail
+the gate instead of silently extending the review budget.
 
 Consumers keep a small event wrapper and pin the reusable workflow to a full
 commit SHA:
