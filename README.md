@@ -36,7 +36,8 @@ address those findings, resolve the corresponding threads, rerun the repository
 checks, and manually dispatch the gate without requesting a third review. The
 gate accepts that final remediation only when the reviewed commit is an ancestor
 of the current head and no Codex thread remains unresolved. A clean review never
-authorizes later unreviewed changes.
+authorizes later unreviewed changes. More than two completed Codex reviews fail
+the gate instead of silently extending the review budget.
 
 Consumers keep a small event wrapper and pin the reusable workflow to a full
 commit SHA:
