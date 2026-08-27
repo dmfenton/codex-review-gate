@@ -60,10 +60,24 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("runs-on: ${{ fromJSON(inputs.runner_labels_json) }}", GATE)
 
     def test_gate_requires_exact_head_and_live_threads(self) -> None:
-        self.assertIn('[[ "$reviewed_sha" == "$head_sha" ]]', GATE)
+        self.assertIn('if [[ "$reviewed_sha" == "$head_sha" ]]', GATE)
         self.assertIn("reviewThreads(first: 100)", GATE)
         self.assertIn("unresolved Codex review thread", GATE)
         self.assertIn("The base branch advanced after the latest Codex review", GATE)
+
+    def test_gate_caps_review_rounds_with_bounded_remediation(self) -> None:
+        self.assertIn("max_review_rounds:", GATE)
+        self.assertIn("default: 2", GATE)
+        self.assertIn("review_rounds=\"$(jq 'length'", GATE)
+        self.assertIn("review_rounds >= MAX_REVIEW_ROUNDS", GATE)
+        self.assertIn("compare/$reviewed_sha...$head_sha", GATE)
+        self.assertIn('[[ "$compare_status" == ahead ]]', GATE)
+        self.assertIn("final-round findings remediated", GATE)
+
+    def test_bounded_remediation_requires_findings_and_resolved_threads(self) -> None:
+        self.assertIn('[[ "$clean_review" == false ]]', GATE)
+        self.assertIn("current head is not a remediation descendant", GATE)
+        self.assertIn("(( unresolved == 0 ))", GATE)
 
     def test_gate_streams_unbounded_review_records(self) -> None:
         self.assertIn("| jq -cs", GATE)

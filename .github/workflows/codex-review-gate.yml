@@ -17,6 +17,11 @@ on:
         required: false
         type: string
         default: main
+      max_review_rounds:
+        description: Maximum Codex review rounds before reviewed findings are remediated without another review
+        required: false
+        type: number
+        default: 2
 
 permissions:
   actions: read
@@ -144,6 +149,7 @@ jobs:
         env:
           BASE_BRANCH: ${{ inputs.base_branch }}
           GH_TOKEN: ${{ github.token }}
+          MAX_REVIEW_ROUNDS: ${{ inputs.max_review_rounds }}
           PR_NUMBER: ${{ inputs.pr_number }}
         run: |
           # shellcheck disable=SC2016
@@ -194,6 +200,7 @@ jobs:
           trap finalize_unexpected_failure EXIT
 
           [[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]] || fail_gate 'A positive pull request number is required.'
+          [[ "$MAX_REVIEW_ROUNDS" =~ ^[1-9][0-9]*$ ]] || fail_gate 'The review-round limit must be a positive integer.'
 
           pr_data="$(retry_api gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER")" || \
             fail_gate "Pull request #$PR_NUMBER could not be read."
@@ -245,6 +252,7 @@ jobs:
 
           latest_review="$(jq -c 'last // empty' <<<"$codex_reviews")"
           [[ -n "$latest_review" ]] || fail_gate 'No completed Codex review exists for this pull request.'
+          review_rounds="$(jq 'length' <<<"$codex_reviews")"
 
           latest_review_id="$(jq -r '.id' <<<"$latest_review")"
           inline_findings="$(jq --argjson review_id "$latest_review_id" '
@@ -258,7 +266,6 @@ jobs:
             (.kind == "review" and $inline_findings == 0 and
               (.body | test("Here are some automated review suggestions for this pull request"; "i")))
           ' <<<"$latest_review")"
-          [[ "$clean_review" == true ]] || fail_gate 'The latest Codex review contains findings.'
 
           reviewed_ref="$(jq -r '
             (.body | try capture("Reviewed commit:[^0-9a-fA-F]*(?<sha>[0-9a-fA-F]{7,40})").sha catch "") as $body_sha
@@ -266,8 +273,20 @@ jobs:
           ' <<<"$latest_review")"
           [[ "$reviewed_ref" =~ ^[0-9a-fA-F]{7,40}$ ]] || fail_gate 'The latest Codex review does not identify its reviewed commit.'
           reviewed_sha="$(retry_api gh api "repos/$GITHUB_REPOSITORY/commits/$reviewed_ref" --jq .sha 2>/dev/null || true)"
-          [[ "$reviewed_sha" == "$head_sha" ]] || \
-            fail_gate "The latest clean Codex review does not cover current head $head_sha."
+          review_outcome='exact-head clean review'
+          if [[ "$reviewed_sha" == "$head_sha" ]]; then
+            [[ "$clean_review" == true ]] || fail_gate 'The latest Codex review contains findings.'
+          else
+            [[ "$clean_review" == false ]] || \
+              fail_gate "The latest clean Codex review does not cover current head $head_sha."
+            (( review_rounds >= MAX_REVIEW_ROUNDS )) || \
+              fail_gate "The latest Codex review does not cover current head $head_sha. One final review round remains."
+            compare_status="$(retry_api gh api \
+              "repos/$GITHUB_REPOSITORY/compare/$reviewed_sha...$head_sha" --jq .status 2>/dev/null || true)"
+            [[ "$compare_status" == ahead ]] || \
+              fail_gate 'The current head is not a remediation descendant of the final reviewed commit.'
+            review_outcome='final-round findings remediated'
+          fi
 
           reviewed_at="$(jq -r '.occurred_at' <<<"$latest_review")"
           base_committed_at="$(retry_api gh api "repos/$GITHUB_REPOSITORY/commits/$base_sha" \
@@ -321,10 +340,15 @@ jobs:
           ' <<<"$thread_data")"
           (( unresolved == 0 )) || fail_gate "$unresolved unresolved Codex review thread comment(s) remain."
 
-          publish_status success 'Exact-head Codex review is clean'
+          if [[ "$review_outcome" == 'exact-head clean review' ]]; then
+            publish_status success 'Exact-head Codex review is clean'
+          else
+            publish_status success 'Final review findings are remediated'
+          fi
           finalized=true
-          printf '### Codex review gate: passed\n\n- PR: #%s\n- Head: %s\n- Base: %s\n- Unresolved Codex threads: 0\n' \
-            "$PR_NUMBER" "$head_sha" "$base_sha" >> "$GITHUB_STEP_SUMMARY"
+          printf '### Codex review gate: passed\n\n- PR: #%s\n- Head: %s\n- Base: %s\n- Review rounds: %s/%s\n- Outcome: %s\n- Unresolved Codex threads: 0\n' \
+            "$PR_NUMBER" "$head_sha" "$base_sha" "$review_rounds" "$MAX_REVIEW_ROUNDS" \
+            "$review_outcome" >> "$GITHUB_STEP_SUMMARY"
 
   reconcile-threads:
     if: inputs.pr_number == '0' && github.event_name != 'push'
