@@ -94,6 +94,31 @@ class WorkflowContractTests(unittest.TestCase):
             "Here are some automated review suggestions for this pull request", GATE
         )
 
+    def test_review_commit_metadata_wins_when_body_omits_label(self) -> None:
+        program = r'''
+          if .kind == "review" and .commit_id != "" then
+            .commit_id
+          else
+            ([.body | capture("Reviewed commit:[^0-9a-fA-F]*(?<sha>[0-9a-fA-F]{7,40})").sha]
+              | first // "")
+          end
+        '''
+        payload = {
+            "kind": "review",
+            "commit_id": "9782bbc22efaab907799868a86edbec32f133fa9",
+            "body": "Codex Review: finding with a source link but no commit label",
+        }
+
+        result = subprocess.run(
+            ["jq", "-r", program],
+            input=json.dumps(payload),
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+
+        self.assertEqual(payload["commit_id"], result.stdout.strip())
+
     def test_paginated_inline_comments_are_flattened_before_review_filtering(self) -> None:
         pages = [
             [{"pull_request_review_id": 41, "user": {"login": "someone"}}],
