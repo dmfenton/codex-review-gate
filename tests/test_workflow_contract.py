@@ -76,6 +76,74 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn('[[ "$compare_status" == ahead ]]', GATE)
         self.assertIn("final-round findings remediated", GATE)
 
+    def test_review_summary_status_comment_is_not_counted_as_a_round(self) -> None:
+        self.assertIn(
+            'contains("<!-- codex-pull-request-review-summary -->") | not', GATE
+        )
+        records = [
+            [
+                [
+                    {
+                        "id": 1,
+                        "body": "<!-- codex-pull-request-review-summary -->\n"
+                        "## Codex Review Summary\nRunning",
+                        "created_at": "2026-08-29T11:27:31Z",
+                        "user": {"login": "chatgpt-codex-connector"},
+                    },
+                    {
+                        "id": 2,
+                        "body": "Codex Review: Didn't find any major issues.\n"
+                        "Reviewed commit: `de72c2e`",
+                        "created_at": "2026-08-29T11:34:54Z",
+                        "user": {"login": "chatgpt-codex-connector"},
+                    },
+                ]
+            ],
+            [
+                [
+                    {
+                        "id": 3,
+                        "body": "### Codex Review\nSuggestions",
+                        "submitted_at": "2026-08-29T11:30:17Z",
+                        "commit_id": "eae9c9a",
+                        "user": {"login": "chatgpt-codex-connector"},
+                    }
+                ]
+            ],
+        ]
+        program = """
+          .[0] as $issues
+          | .[1] as $reviews
+          | [
+              ($issues | add[]? | {
+                id, body: (.body // ""), occurred_at: (.created_at // ""),
+                commit_id: "", login: (.user.login // ""), kind: "issue"
+              }),
+              ($reviews | add[]? | {
+                id, body: (.body // ""), occurred_at: (.submitted_at // ""),
+                commit_id: (.commit_id // ""), login: (.user.login // ""),
+                kind: "review"
+              })
+            ]
+          | map(select(.login
+              | IN("chatgpt-codex-connector", "chatgpt-codex-connector[bot]")))
+          | map(select(.kind != "issue" or
+              (.body | contains("<!-- codex-pull-request-review-summary -->") | not)))
+          | map(select(.body | test("Codex Review"; "i")))
+          | sort_by(.occurred_at, .id)
+        """
+
+        result = subprocess.run(
+            ["jq", "-cs", program],
+            input="\n".join(json.dumps(page) for page in records),
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+
+        normalized = json.loads(result.stdout)
+        self.assertEqual([3, 2], [record["id"] for record in normalized])
+
     def test_bounded_remediation_requires_findings_and_resolved_threads(self) -> None:
         self.assertIn('[[ "$clean_review" == false ]]', GATE)
         self.assertIn("current head is not a remediation descendant", GATE)
