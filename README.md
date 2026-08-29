@@ -62,4 +62,8 @@ Every consumer must pin a full commit SHA. Do not reference a mutable branch or
 tag. Keep the caller at `.github/workflows/codex-p1-gate.yml` so the commit
 status context stays consistent across repositories.
 
+The connector's persistent `Codex Review Summary` status comment is not a
+review round. Only completed finding reviews and completed clean-review
+comments count toward the hard two-round limit.
+
 Validate changes with `scripts/validate.sh`.

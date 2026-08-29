@@ -238,6 +238,8 @@ jobs:
                 })
               ]
               | map(select(.login | IN("chatgpt-codex-connector", "chatgpt-codex-connector[bot]")))
+              | map(select(.kind != "issue" or
+                  (.body | contains("<!-- codex-pull-request-review-summary -->") | not)))
               | map(select(.body | test("Codex Review"; "i")))
               | sort_by(.occurred_at, .id)
             ')" || fail_gate 'Codex review records could not be normalized.'
