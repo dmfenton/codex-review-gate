@@ -195,19 +195,16 @@ class WorkflowContractTests(unittest.TestCase):
             "Here are some automated review suggestions for this pull request", GATE
         )
 
-    def test_review_commit_metadata_wins_when_body_omits_label(self) -> None:
+    def test_record_commit_metadata_wins_when_body_omits_label(self) -> None:
         program = r'''
-          if .kind == "review" and .commit_id != "" then
-            .commit_id
-          else
-            ([.body | capture("Reviewed commit:[^0-9a-fA-F]*(?<sha>[0-9a-fA-F]{7,40})").sha]
-              | first // "")
-          end
+          ([.body | capture("Reviewed commit:[^0-9a-fA-F]*(?<sha>[0-9a-fA-F]{7,40})").sha]
+            | first // "") as $body_sha
+          | if (.commit_id // "") != "" then .commit_id else $body_sha end
         '''
         payload = {
-            "kind": "review",
-            "commit_id": "9782bbc22efaab907799868a86edbec32f133fa9",
-            "body": "Codex Review: finding with a source link but no commit label",
+            "kind": "summary",
+            "commit_id": "33f18d1",
+            "body": "<!-- codex-pull-request-review-summary --> completed",
         }
 
         result = subprocess.run(

@@ -301,12 +301,9 @@ jobs:
           ' <<<"$latest_review")"
 
           reviewed_ref="$(jq -r '
-            if .kind == "review" and .commit_id != "" then
-              .commit_id
-            else
-              ([.body | capture("Reviewed commit:[^0-9a-fA-F]*(?<sha>[0-9a-fA-F]{7,40})").sha]
-                | first // "")
-            end
+            ([.body | capture("Reviewed commit:[^0-9a-fA-F]*(?<sha>[0-9a-fA-F]{7,40})").sha]
+              | first // "") as $body_sha
+            | if (.commit_id // "") != "" then .commit_id else $body_sha end
           ' <<<"$latest_review")"
           [[ "$reviewed_ref" =~ ^[0-9a-fA-F]{7,40}$ ]] || fail_gate 'The latest Codex review does not identify its reviewed commit.'
           reviewed_sha="$(retry_api gh api "repos/$GITHUB_REPOSITORY/commits/$reviewed_ref" --jq .sha 2>/dev/null || true)"
