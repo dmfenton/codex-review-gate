@@ -12,6 +12,11 @@ on the live pull-request head and succeeds only when all of these are true:
 - the pull request head and base stay unchanged during the audit; and
 - live GraphQL `reviewThreads` contains no unresolved Codex thread.
 
+Finding-free connector reviews may be represented by the bot's completed summary
+plus a pull-request thumbs-up. The gate accepts that shape only when the summary
+names the reviewed commit and the bot-owned signals occur within five minutes;
+stale, user-authored, running, or unbound reactions fail closed.
+
 The workflow does not post comments or redispatch itself. An hourly self-hosted
 sentinel fails any PR head with a reopened or otherwise unresolved Codex thread;
 it never publishes success. This backstops GitHub Actions' lack of a review-thread

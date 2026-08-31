@@ -76,25 +76,24 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn('[[ "$compare_status" == ahead ]]', GATE)
         self.assertIn("final-round findings remediated", GATE)
 
-    def test_review_summary_status_comment_is_not_counted_as_a_round(self) -> None:
+    def test_clean_review_summary_requires_timely_codex_reaction(self) -> None:
         self.assertIn(
             'contains("<!-- codex-pull-request-review-summary -->") | not', GATE
         )
+        self.assertIn("issues/$PR_NUMBER/reactions?per_page=100", GATE)
+        self.assertIn("fromdateiso8601", GATE)
         records = [
             [
                 [
                     {
                         "id": 1,
                         "body": "<!-- codex-pull-request-review-summary -->\n"
-                        "## Codex Review Summary\nRunning",
+                        "## Codex Review Summary\n"
+                        "| Review | Status | Commit | Review trigger |\n"
+                        "| --- | --- | --- | --- |\n"
+                        "| Code Review | **Completed** now | `de72c2e` | PR opened |",
                         "created_at": "2026-08-29T11:27:31Z",
-                        "user": {"login": "chatgpt-codex-connector"},
-                    },
-                    {
-                        "id": 2,
-                        "body": "Codex Review: Didn't find any major issues.\n"
-                        "Reviewed commit: `de72c2e`",
-                        "created_at": "2026-08-29T11:34:54Z",
+                        "updated_at": "2026-08-29T11:34:55Z",
                         "user": {"login": "chatgpt-codex-connector"},
                     },
                 ]
@@ -102,35 +101,34 @@ class WorkflowContractTests(unittest.TestCase):
             [
                 [
                     {
-                        "id": 3,
-                        "body": "### Codex Review\nSuggestions",
-                        "submitted_at": "2026-08-29T11:30:17Z",
-                        "commit_id": "eae9c9a",
-                        "user": {"login": "chatgpt-codex-connector"},
+                        "content": "+1",
+                        "created_at": "2026-08-29T11:34:54Z",
+                        "user": {"login": "chatgpt-codex-connector[bot]"},
                     }
                 ]
             ],
         ]
-        program = """
+        program = r"""
           .[0] as $issues
-          | .[1] as $reviews
+          | .[1] as $reactions
           | [
-              ($issues | add[]? | {
-                id, body: (.body // ""), occurred_at: (.created_at // ""),
-                commit_id: "", login: (.user.login // ""), kind: "issue"
-              }),
-              ($reviews | add[]? | {
-                id, body: (.body // ""), occurred_at: (.submitted_at // ""),
-                commit_id: (.commit_id // ""), login: (.user.login // ""),
-                kind: "review"
-              })
+              $issues | add[]?
+              | select((.user.login // "")
+                  | IN("chatgpt-codex-connector", "chatgpt-codex-connector[bot]"))
+              | select(.body | contains("<!-- codex-pull-request-review-summary -->"))
+              | . as $summary
+              | (try (.body | capture(
+                  "\\*\\*Completed\\*\\*[^\\n]*\\|[[:space:]]*`(?<sha>[0-9a-fA-F]{7,40})`[[:space:]]*\\|"
+                ).sha) catch "") as $sha
+              | select($sha != "")
+              | select(any($reactions | add[]?;
+                  ((.user.login // "")
+                    | IN("chatgpt-codex-connector", "chatgpt-codex-connector[bot]")) and
+                  .content == "+1" and
+                  ((((.created_at | fromdateiso8601) -
+                    ($summary.updated_at | fromdateiso8601)) | fabs) <= 300)))
+              | {id, commit_id: $sha, kind: "summary"}
             ]
-          | map(select(.login
-              | IN("chatgpt-codex-connector", "chatgpt-codex-connector[bot]")))
-          | map(select(.kind != "issue" or
-              (.body | contains("<!-- codex-pull-request-review-summary -->") | not)))
-          | map(select(.body | test("Codex Review"; "i")))
-          | sort_by(.occurred_at, .id)
         """
 
         result = subprocess.run(
@@ -138,11 +136,46 @@ class WorkflowContractTests(unittest.TestCase):
             input="\n".join(json.dumps(page) for page in records),
             text=True,
             capture_output=True,
-            check=True,
+            check=False,
         )
+        self.assertEqual(0, result.returncode, result.stderr)
 
         normalized = json.loads(result.stdout)
-        self.assertEqual([3, 2], [record["id"] for record in normalized])
+        self.assertEqual([{"id": 1, "commit_id": "de72c2e", "kind": "summary"}], normalized)
+
+        records[1][0][0]["created_at"] = "2026-08-29T10:00:00Z"
+        stale_result = subprocess.run(
+            ["jq", "-cs", program],
+            input="\n".join(json.dumps(page) for page in records),
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        self.assertEqual([], json.loads(stale_result.stdout))
+
+        records[1][0][0]["created_at"] = "2026-08-29T11:34:54Z"
+        records[1][0][0]["user"]["login"] = "someone-else"
+        wrong_actor_result = subprocess.run(
+            ["jq", "-cs", program],
+            input="\n".join(json.dumps(page) for page in records),
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        self.assertEqual([], json.loads(wrong_actor_result.stdout))
+
+        records[1][0][0]["user"]["login"] = "chatgpt-codex-connector[bot]"
+        records[0][0][0]["body"] = records[0][0][0]["body"].replace(
+            "**Completed**", "**Running**"
+        )
+        running_result = subprocess.run(
+            ["jq", "-cs", program],
+            input="\n".join(json.dumps(page) for page in records),
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        self.assertEqual([], json.loads(running_result.stdout))
 
     def test_bounded_remediation_requires_findings_and_resolved_threads(self) -> None:
         self.assertIn('[[ "$clean_review" == false ]]', GATE)
