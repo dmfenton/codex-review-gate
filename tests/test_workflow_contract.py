@@ -91,7 +91,9 @@ class WorkflowContractTests(unittest.TestCase):
                         "## Codex Review Summary\n"
                         "| Review | Status | Commit | Review trigger |\n"
                         "| --- | --- | --- | --- |\n"
-                        "| Code Review | **Completed** now | `de72c2e` | PR opened |",
+                        "| Code Review | **Completed** <relative-time "
+                        'datetime="2026-08-29T11:33:00Z">now</relative-time> '
+                        "| `de72c2e` | PR opened |",
                         "created_at": "2026-08-29T11:27:31Z",
                         "updated_at": "2026-08-29T11:34:55Z",
                         "user": {"login": "chatgpt-codex-connector"},
@@ -118,16 +120,17 @@ class WorkflowContractTests(unittest.TestCase):
               | select(.body | contains("<!-- codex-pull-request-review-summary -->"))
               | . as $summary
               | (try (.body | capture(
-                  "\\*\\*Completed\\*\\*[^\\n]*\\|[[:space:]]*`(?<sha>[0-9a-fA-F]{7,40})`[[:space:]]*\\|"
-                ).sha) catch "") as $sha
-              | select($sha != "")
+                  "\\*\\*Completed\\*\\*[^\\n]*datetime=\\\"(?<started>[^\\\"]+)\\\"[^\\n]*\\|[[:space:]]*`(?<sha>[0-9a-fA-F]{7,40})`[[:space:]]*\\|"
+                )) catch {}) as $completion
+              | select(($completion.sha // "") != "")
               | select(any($reactions | add[]?;
                   ((.user.login // "")
                     | IN("chatgpt-codex-connector", "chatgpt-codex-connector[bot]")) and
                   .content == "+1" and
+                  .created_at >= $completion.started and
                   ((((.created_at | fromdateiso8601) -
                     ($summary.updated_at | fromdateiso8601)) | fabs) <= 300)))
-              | {id, commit_id: $sha, kind: "summary"}
+              | {id, commit_id: $completion.sha, kind: "summary"}
             ]
         """
 
@@ -153,6 +156,16 @@ class WorkflowContractTests(unittest.TestCase):
         )
         self.assertEqual([], json.loads(stale_result.stdout))
 
+        records[1][0][0]["created_at"] = "2026-08-29T11:32:59Z"
+        prior_review_result = subprocess.run(
+            ["jq", "-cs", program],
+            input="\n".join(json.dumps(page) for page in records),
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        self.assertEqual([], json.loads(prior_review_result.stdout))
+
         records[1][0][0]["created_at"] = "2026-08-29T11:34:54Z"
         records[1][0][0]["user"]["login"] = "someone-else"
         wrong_actor_result = subprocess.run(
@@ -176,6 +189,20 @@ class WorkflowContractTests(unittest.TestCase):
             check=True,
         )
         self.assertEqual([], json.loads(running_result.stdout))
+
+    def test_review_round_count_preserves_manual_and_initial_rounds(self) -> None:
+        self.assertIn("manual_review_requests=", GATE)
+        self.assertIn("automatic_initial_round=0", GATE)
+        self.assertIn("requested_review_rounds=", GATE)
+        self.assertIn("requested_review_rounds > review_rounds", GATE)
+
+        def rounds(*, records: int, manual: int, automatic_initial: int) -> int:
+            return max(records, manual + automatic_initial)
+
+        self.assertEqual(1, rounds(records=1, manual=0, automatic_initial=1))
+        self.assertEqual(2, rounds(records=1, manual=1, automatic_initial=1))
+        self.assertEqual(3, rounds(records=1, manual=2, automatic_initial=1))
+        self.assertEqual(2, rounds(records=2, manual=2, automatic_initial=0))
 
     def test_bounded_remediation_requires_findings_and_resolved_threads(self) -> None:
         self.assertIn('[[ "$clean_review" == false ]]', GATE)
