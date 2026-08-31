@@ -15,13 +15,14 @@ on the live pull-request head and succeeds only when all of these are true:
 Finding-free connector reviews may be represented by the bot's completed summary
 plus a pull-request thumbs-up. The gate accepts that shape only when the summary
 names the reviewed commit and the bot-owned reaction follows that review's start
-within the summary completion window. Review rounds are completed connector
-outcomes attributed to their triggering request. A trigger comment alone and a
-connector error do not consume the review budget; pending and failed attempts
-remain fail-closed until a completed outcome exists. Multiple completion
-artifacts for one request are one round, while separate completed requests for
-the same commit remain separate rounds. Stale, user-authored, running, unbound,
-and over-budget signals fail closed.
+within the summary completion window. Review rounds are authoritative completed
+connector outcomes. A trigger comment alone and a connector error do not consume
+the review budget; pending and failed attempts remain fail-closed until a
+completed outcome exists. A summary published within 30 seconds of an explicit
+completion for the same commit is the duplicate status artifact for that round.
+Separate completed outcomes remain separate rounds even when they review the
+same commit. Stale, user-authored, running, unbound, and over-budget signals fail
+closed.
 
 The workflow does not post comments or redispatch itself. An hourly self-hosted
 sentinel fails any PR head with a reopened or otherwise unresolved Codex thread;
@@ -75,7 +76,7 @@ status context stays consistent across repositories.
 
 The connector's persistent `Codex Review Summary` status comment can prove a
 completed clean review, but duplicate records produced by that same review
-request are one round. Only completed finding or clean-review outcomes count
+completion are one round. Only completed finding or clean-review outcomes count
 toward the hard two-round limit.
 
 Validate changes with `scripts/validate.sh`.
