@@ -221,11 +221,47 @@ jobs:
           review_comment_pages="$(retry_api gh api --paginate --slurp \
             "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/comments?per_page=100")" || \
             fail_gate 'Pull request review comments could not be read.'
+          reaction_pages="$(retry_api gh api --paginate --slurp \
+            "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/reactions?per_page=100")" || \
+            fail_gate 'Pull request reactions could not be read.'
+
+          # A finding-free review now completes by editing the persistent summary
+          # comment and adding a pull-request thumbs-up instead of creating a
+          # review record. Bind both bot-owned signals to the same short time
+          # window; the summary itself identifies the reviewed commit.
+          clean_summary_reviews="$(printf '%s\n%s\n' "$issue_pages" "$reaction_pages" | jq -cs '
+              .[0] as $issues
+              | .[1] as $reactions
+              | [
+                  $issues | add[]?
+                  | select((.user.login // "")
+                      | IN("chatgpt-codex-connector", "chatgpt-codex-connector[bot]"))
+                  | select(.body | contains("<!-- codex-pull-request-review-summary -->"))
+                  | . as $summary
+                  | (try (.body | capture(
+                      "\\*\\*Completed\\*\\*[^\\n]*datetime=\\\"(?<started>[^\\\"]+)\\\"[^\\n]*\\|[[:space:]]*`(?<sha>[0-9a-fA-F]{7,40})`[[:space:]]*\\|"
+                    )) catch {}) as $completion
+                  | select(($completion.sha // "") != "")
+                  | select(any($reactions | add[]?;
+                      ((.user.login // "")
+                        | IN("chatgpt-codex-connector", "chatgpt-codex-connector[bot]")) and
+                      .content == "+1" and
+                      .created_at >= $completion.started and
+                      ((((.created_at | fromdateiso8601) -
+                        ($summary.updated_at | fromdateiso8601)) | fabs) <= 300)))
+                  | {
+                      id, body: (.body // ""), occurred_at: (.updated_at // ""),
+                      commit_id: $completion.sha, login: (.user.login // ""), kind: "summary"
+                    }
+                ]
+            ')" || fail_gate 'Clean Codex review summary could not be normalized.'
 
           # shellcheck disable=SC2016
-          codex_reviews="$(printf '%s\n%s\n' "$issue_pages" "$review_pages" | jq -cs '
+          codex_reviews="$(printf '%s\n%s\n%s\n' \
+            "$issue_pages" "$review_pages" "$clean_summary_reviews" | jq -cs '
               .[0] as $issues
               | .[1] as $reviews
+              | .[2] as $summaries
               |
               [
                 ($issues | add[]? | {
@@ -235,7 +271,8 @@ jobs:
                 ($reviews | add[]? | {
                   id, body: (.body // ""), occurred_at: (.submitted_at // ""),
                   commit_id: (.commit_id // ""), login: (.user.login // ""), kind: "review"
-                })
+                }),
+                ($summaries[]?)
               ]
               | map(select(.login | IN("chatgpt-codex-connector", "chatgpt-codex-connector[bot]")))
               | map(select(.kind != "issue" or
@@ -246,7 +283,36 @@ jobs:
 
           latest_review="$(jq -c 'last // empty' <<<"$codex_reviews")"
           [[ -n "$latest_review" ]] || fail_gate 'No completed Codex review exists for this pull request.'
-          review_rounds="$(jq 'length' <<<"$codex_reviews")"
+          recorded_review_rounds="$(jq 'length' <<<"$codex_reviews")"
+          manual_review_requests="$(jq '
+            [add[]?
+              | select((.author_association // "")
+                  | IN("OWNER", "MEMBER", "COLLABORATOR"))
+              | select((.body // "")
+                  | test("@codex[[:space:]]+(security[[:space:]]+)?review"; "i"))]
+            | sort_by(.created_at, .id)
+          ' <<<"$issue_pages")" || fail_gate 'Manual Codex review requests could not be normalized.'
+          manual_review_rounds="$(jq 'length' <<<"$manual_review_requests")"
+          first_manual_review_at="$(jq -r 'first.created_at // ""' <<<"$manual_review_requests")"
+          review_summary_created_at="$(jq -r '
+            [add[]?
+              | select((.user.login // "")
+                  | IN("chatgpt-codex-connector", "chatgpt-codex-connector[bot]"))
+              | select((.body // "")
+                  | contains("<!-- codex-pull-request-review-summary -->"))]
+            | sort_by(.created_at, .id)
+            | first.created_at // ""
+          ' <<<"$issue_pages")" || fail_gate 'Codex review summary timing could not be normalized.'
+          automatic_initial_round=0
+          if [[ -n "$review_summary_created_at" && \
+            ( -z "$first_manual_review_at" || "$review_summary_created_at" < "$first_manual_review_at" ) ]]; then
+            automatic_initial_round=1
+          fi
+          requested_review_rounds=$((manual_review_rounds + automatic_initial_round))
+          review_rounds="$recorded_review_rounds"
+          if (( requested_review_rounds > review_rounds )); then
+            review_rounds="$requested_review_rounds"
+          fi
           (( review_rounds <= MAX_REVIEW_ROUNDS )) || \
             fail_gate "Codex review limit exceeded: $review_rounds/$MAX_REVIEW_ROUNDS rounds."
 
@@ -259,17 +325,15 @@ jobs:
           ' <<<"$review_comment_pages")" || fail_gate 'Codex inline review comments could not be normalized.'
           clean_review="$(jq -r --argjson inline_findings "$inline_findings" '
             (.body | test("Codex Review: Didn.t find any major issues"; "i")) or
+            (.kind == "summary") or
             (.kind == "review" and $inline_findings == 0 and
               (.body | test("Here are some automated review suggestions for this pull request"; "i")))
           ' <<<"$latest_review")"
 
           reviewed_ref="$(jq -r '
-            if .kind == "review" and .commit_id != "" then
-              .commit_id
-            else
-              ([.body | capture("Reviewed commit:[^0-9a-fA-F]*(?<sha>[0-9a-fA-F]{7,40})").sha]
-                | first // "")
-            end
+            ([.body | capture("Reviewed commit:[^0-9a-fA-F]*(?<sha>[0-9a-fA-F]{7,40})").sha]
+              | first // "") as $body_sha
+            | if (.commit_id // "") != "" then .commit_id else $body_sha end
           ' <<<"$latest_review")"
           [[ "$reviewed_ref" =~ ^[0-9a-fA-F]{7,40}$ ]] || fail_gate 'The latest Codex review does not identify its reviewed commit.'
           reviewed_sha="$(retry_api gh api "repos/$GITHUB_REPOSITORY/commits/$reviewed_ref" --jq .sha 2>/dev/null || true)"
