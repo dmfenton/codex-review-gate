@@ -278,41 +278,31 @@ jobs:
               | map(select(.kind != "issue" or
                   (.body | contains("<!-- codex-pull-request-review-summary -->") | not)))
               | map(select(.body | test("Codex Review"; "i")))
+              | map(. + {
+                  reviewed_ref: (
+                    if (.commit_id // "") != "" then .commit_id
+                    else (try (.body | capture(
+                      "Reviewed commit:[^0-9a-fA-F]*(?<sha>[0-9a-fA-F]{7,40})"
+                    ).sha) catch "")
+                    end
+                    | ascii_downcase
+                  )
+                })
+              | map(select(.reviewed_ref | test("^[0-9a-f]{7,40}$")))
               | sort_by(.occurred_at, .id)
+              | reduce .[] as $review ([];
+                  [ .[]
+                    | .reviewed_ref as $existing_ref
+                    | select((
+                        ($existing_ref | startswith($review.reviewed_ref)) or
+                        ($review.reviewed_ref | startswith($existing_ref))
+                      ) | not)
+                  ] + [$review])
             ')" || fail_gate 'Codex review records could not be normalized.'
 
           latest_review="$(jq -c 'last // empty' <<<"$codex_reviews")"
           [[ -n "$latest_review" ]] || fail_gate 'No completed Codex review exists for this pull request.'
-          recorded_review_rounds="$(jq 'length' <<<"$codex_reviews")"
-          manual_review_requests="$(jq '
-            [add[]?
-              | select((.author_association // "")
-                  | IN("OWNER", "MEMBER", "COLLABORATOR"))
-              | select((.body // "")
-                  | test("@codex[[:space:]]+(security[[:space:]]+)?review"; "i"))]
-            | sort_by(.created_at, .id)
-          ' <<<"$issue_pages")" || fail_gate 'Manual Codex review requests could not be normalized.'
-          manual_review_rounds="$(jq 'length' <<<"$manual_review_requests")"
-          first_manual_review_at="$(jq -r 'first.created_at // ""' <<<"$manual_review_requests")"
-          review_summary_created_at="$(jq -r '
-            [add[]?
-              | select((.user.login // "")
-                  | IN("chatgpt-codex-connector", "chatgpt-codex-connector[bot]"))
-              | select((.body // "")
-                  | contains("<!-- codex-pull-request-review-summary -->"))]
-            | sort_by(.created_at, .id)
-            | first.created_at // ""
-          ' <<<"$issue_pages")" || fail_gate 'Codex review summary timing could not be normalized.'
-          automatic_initial_round=0
-          if [[ -n "$review_summary_created_at" && \
-            ( -z "$first_manual_review_at" || "$review_summary_created_at" < "$first_manual_review_at" ) ]]; then
-            automatic_initial_round=1
-          fi
-          requested_review_rounds=$((manual_review_rounds + automatic_initial_round))
-          review_rounds="$recorded_review_rounds"
-          if (( requested_review_rounds > review_rounds )); then
-            review_rounds="$requested_review_rounds"
-          fi
+          review_rounds="$(jq 'length' <<<"$codex_reviews")"
           (( review_rounds <= MAX_REVIEW_ROUNDS )) || \
             fail_gate "Codex review limit exceeded: $review_rounds/$MAX_REVIEW_ROUNDS rounds."
 
@@ -330,11 +320,7 @@ jobs:
               (.body | test("Here are some automated review suggestions for this pull request"; "i")))
           ' <<<"$latest_review")"
 
-          reviewed_ref="$(jq -r '
-            ([.body | capture("Reviewed commit:[^0-9a-fA-F]*(?<sha>[0-9a-fA-F]{7,40})").sha]
-              | first // "") as $body_sha
-            | if (.commit_id // "") != "" then .commit_id else $body_sha end
-          ' <<<"$latest_review")"
+          reviewed_ref="$(jq -r '.reviewed_ref' <<<"$latest_review")"
           [[ "$reviewed_ref" =~ ^[0-9a-fA-F]{7,40}$ ]] || fail_gate 'The latest Codex review does not identify its reviewed commit.'
           reviewed_sha="$(retry_api gh api "repos/$GITHUB_REPOSITORY/commits/$reviewed_ref" --jq .sha 2>/dev/null || true)"
           review_outcome='exact-head clean review'

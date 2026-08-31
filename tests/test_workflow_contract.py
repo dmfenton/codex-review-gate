@@ -190,19 +190,89 @@ class WorkflowContractTests(unittest.TestCase):
         )
         self.assertEqual([], json.loads(running_result.stdout))
 
-    def test_review_round_count_preserves_manual_and_initial_rounds(self) -> None:
-        self.assertIn("manual_review_requests=", GATE)
-        self.assertIn("automatic_initial_round=0", GATE)
-        self.assertIn("requested_review_rounds=", GATE)
-        self.assertIn("requested_review_rounds > review_rounds", GATE)
+    def test_review_round_count_uses_completed_distinct_review_heads(self) -> None:
+        self.assertNotIn("manual_review_requests=", GATE)
+        self.assertNotIn("requested_review_rounds=", GATE)
+        self.assertIn("reviewed_ref:", GATE)
+        self.assertIn('map(select(.reviewed_ref | test("^[0-9a-f]{7,40}$")))', GATE)
+        self.assertIn("reduce .[] as $review", GATE)
 
-        def rounds(*, records: int, manual: int, automatic_initial: int) -> int:
-            return max(records, manual + automatic_initial)
+        program = r'''
+          map(. + {
+            reviewed_ref: (
+              if (.commit_id // "") != "" then .commit_id
+              else (try (.body | capture(
+                "Reviewed commit:[^0-9a-fA-F]*(?<sha>[0-9a-fA-F]{7,40})"
+              ).sha) catch "")
+              end
+              | ascii_downcase
+            )
+          })
+          | map(select(.reviewed_ref | test("^[0-9a-f]{7,40}$")))
+          | sort_by(.occurred_at, .id)
+          | reduce .[] as $review ([];
+              [ .[]
+                | .reviewed_ref as $existing_ref
+                | select((
+                    ($existing_ref | startswith($review.reviewed_ref)) or
+                    ($review.reviewed_ref | startswith($existing_ref))
+                  ) | not)
+              ] + [$review])
+        '''
+        records = [
+            {
+                "id": 1,
+                "kind": "review",
+                "commit_id": "89856cce8ea68313eb79fdb78054f7b808658be3",
+                "body": "Codex Review with findings",
+                "occurred_at": "2026-08-31T15:08:08Z",
+            },
+            {
+                "id": 2,
+                "kind": "review",
+                "commit_id": "50333f69def9011adfd2e524a1ce95914dcc93b6",
+                "body": "Codex Review with findings",
+                "occurred_at": "2026-08-31T15:28:15Z",
+            },
+            {
+                "id": 3,
+                "kind": "issue",
+                "commit_id": "",
+                "body": "Codex Review: Something went wrong. Try again later.",
+                "occurred_at": "2026-08-31T15:46:47Z",
+            },
+            {
+                "id": 4,
+                "kind": "issue",
+                "commit_id": "",
+                "body": "Codex Review: Didn't find any major issues. "
+                "Reviewed commit: `d6caf508f0`",
+                "occurred_at": "2026-08-31T16:19:59Z",
+            },
+            {
+                "id": 5,
+                "kind": "summary",
+                "commit_id": "d6caf50",
+                "body": "Codex Review Summary",
+                "occurred_at": "2026-08-31T16:20:08Z",
+            },
+        ]
 
-        self.assertEqual(1, rounds(records=1, manual=0, automatic_initial=1))
-        self.assertEqual(2, rounds(records=1, manual=1, automatic_initial=1))
-        self.assertEqual(3, rounds(records=1, manual=2, automatic_initial=1))
-        self.assertEqual(2, rounds(records=2, manual=2, automatic_initial=0))
+        result = subprocess.run(
+            ["jq", program],
+            input=json.dumps(records),
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        normalized = json.loads(result.stdout)
+
+        self.assertEqual(3, len(normalized))
+        self.assertEqual(
+            ["89856cce8ea68313eb79fdb78054f7b808658be3", "50333f69def9011adfd2e524a1ce95914dcc93b6", "d6caf50"],
+            [review["reviewed_ref"] for review in normalized],
+        )
+        self.assertEqual("summary", normalized[-1]["kind"])
 
     def test_bounded_remediation_requires_findings_and_resolved_threads(self) -> None:
         self.assertIn('[[ "$clean_review" == false ]]', GATE)
