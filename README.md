@@ -16,10 +16,12 @@ Finding-free connector reviews may be represented by the bot's completed summary
 plus a pull-request thumbs-up. The gate accepts that shape only when the summary
 names the reviewed commit and the bot-owned reaction follows that review's start
 within the summary completion window. Review rounds are completed connector
-outcomes, deduplicated by reviewed commit. Manual trigger comments and connector
-errors do not consume the review budget; pending and failed attempts remain
-fail-closed until a completed outcome exists. Stale, user-authored, running,
-unbound, and over-budget signals fail closed.
+outcomes attributed to their triggering request. A trigger comment alone and a
+connector error do not consume the review budget; pending and failed attempts
+remain fail-closed until a completed outcome exists. Multiple completion
+artifacts for one request are one round, while separate completed requests for
+the same commit remain separate rounds. Stale, user-authored, running, unbound,
+and over-budget signals fail closed.
 
 The workflow does not post comments or redispatch itself. An hourly self-hosted
 sentinel fails any PR head with a reopened or otherwise unresolved Codex thread;
@@ -72,8 +74,8 @@ tag. Keep the caller at `.github/workflows/codex-p1-gate.yml` so the commit
 status context stays consistent across repositories.
 
 The connector's persistent `Codex Review Summary` status comment can prove a
-completed clean review, but duplicate records for that same reviewed commit are
-one round. Only distinct completed finding or clean-review outcomes count toward
-the hard two-round limit.
+completed clean review, but duplicate records produced by that same review
+request are one round. Only completed finding or clean-review outcomes count
+toward the hard two-round limit.
 
 Validate changes with `scripts/validate.sh`.

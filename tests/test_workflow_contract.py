@@ -198,7 +198,10 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("reduce .[] as $review", GATE)
 
         program = r'''
-          map(. + {
+          .[0] as $records
+          | .[1] as $manual_requests
+          | $records
+          | map(. + {
             reviewed_ref: (
               if (.commit_id // "") != "" then .commit_id
               else (try (.body | capture(
@@ -210,14 +213,20 @@ class WorkflowContractTests(unittest.TestCase):
           })
           | map(select(.reviewed_ref | test("^[0-9a-f]{7,40}$")))
           | sort_by(.occurred_at, .id)
+          | map(. as $review
+              | ($manual_requests
+                  | map(select(.created_at <= $review.occurred_at))
+                  | last.id // null) as $request_id
+              | . + {
+                  round_key: (
+                    if $request_id == null
+                    then "automatic:\(.reviewed_ref[0:7])"
+                    else "manual:\($request_id)"
+                    end
+                  )
+                })
           | reduce .[] as $review ([];
-              [ .[]
-                | .reviewed_ref as $existing_ref
-                | select((
-                    ($existing_ref | startswith($review.reviewed_ref)) or
-                    ($review.reviewed_ref | startswith($existing_ref))
-                  ) | not)
-              ] + [$review])
+              map(select(.round_key != $review.round_key)) + [$review])
         '''
         records = [
             {
@@ -257,10 +266,16 @@ class WorkflowContractTests(unittest.TestCase):
                 "occurred_at": "2026-08-31T16:20:08Z",
             },
         ]
+        manual_requests = [
+            {"id": 101, "created_at": "2026-08-31T15:00:00Z"},
+            {"id": 102, "created_at": "2026-08-31T15:20:00Z"},
+            {"id": 103, "created_at": "2026-08-31T15:35:25Z"},
+            {"id": 104, "created_at": "2026-08-31T16:15:36Z"},
+        ]
 
         result = subprocess.run(
             ["jq", program],
-            input=json.dumps(records),
+            input=json.dumps([records, manual_requests]),
             text=True,
             capture_output=True,
             check=True,
@@ -273,6 +288,38 @@ class WorkflowContractTests(unittest.TestCase):
             [review["reviewed_ref"] for review in normalized],
         )
         self.assertEqual("summary", normalized[-1]["kind"])
+        self.assertEqual(
+            ["manual:101", "manual:102", "manual:104"],
+            [review["round_key"] for review in normalized],
+        )
+
+        repeated_success = records + [
+            {
+                "id": 6,
+                "kind": "issue",
+                "commit_id": "",
+                "body": "Codex Review: Didn't find any major issues. "
+                "Reviewed commit: `d6caf508f0`",
+                "occurred_at": "2026-08-31T16:30:00Z",
+            }
+        ]
+        repeated_requests = manual_requests + [
+            {"id": 105, "created_at": "2026-08-31T16:25:00Z"}
+        ]
+        repeated_result = subprocess.run(
+            ["jq", program],
+            input=json.dumps([repeated_success, repeated_requests]),
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        repeated_normalized = json.loads(repeated_result.stdout)
+
+        self.assertEqual(4, len(repeated_normalized))
+        self.assertEqual(
+            ["manual:101", "manual:102", "manual:104", "manual:105"],
+            [review["round_key"] for review in repeated_normalized],
+        )
 
     def test_bounded_remediation_requires_findings_and_resolved_threads(self) -> None:
         self.assertIn('[[ "$clean_review" == false ]]', GATE)

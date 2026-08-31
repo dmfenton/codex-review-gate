@@ -262,6 +262,13 @@ jobs:
               .[0] as $issues
               | .[1] as $reviews
               | .[2] as $summaries
+              | ([$issues | add[]?
+                  | select((.author_association // "")
+                      | IN("OWNER", "MEMBER", "COLLABORATOR"))
+                  | select((.body // "")
+                      | test("@codex[[:space:]]+(security[[:space:]]+)?review"; "i"))
+                  | {id, created_at}]
+                | sort_by(.created_at, .id)) as $manual_requests
               |
               [
                 ($issues | add[]? | {
@@ -290,14 +297,20 @@ jobs:
                 })
               | map(select(.reviewed_ref | test("^[0-9a-f]{7,40}$")))
               | sort_by(.occurred_at, .id)
+              | map(. as $review
+                  | ($manual_requests
+                      | map(select(.created_at <= $review.occurred_at))
+                      | last.id // null) as $request_id
+                  | . + {
+                      round_key: (
+                        if $request_id == null
+                        then "automatic:\(.reviewed_ref[0:7])"
+                        else "manual:\($request_id)"
+                        end
+                      )
+                    })
               | reduce .[] as $review ([];
-                  [ .[]
-                    | .reviewed_ref as $existing_ref
-                    | select((
-                        ($existing_ref | startswith($review.reviewed_ref)) or
-                        ($review.reviewed_ref | startswith($existing_ref))
-                      ) | not)
-                  ] + [$review])
+                  map(select(.round_key != $review.round_key)) + [$review])
             ')" || fail_gate 'Codex review records could not be normalized.'
 
           latest_review="$(jq -c 'last // empty' <<<"$codex_reviews")"
