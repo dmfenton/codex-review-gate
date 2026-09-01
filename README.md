@@ -11,8 +11,8 @@ on the live pull-request head and succeeds only when all of these are true:
 - the review happened after the current base commit;
 - the pull request head and base stay unchanged during the audit; and
 - live GraphQL `reviewThreads` contains no unresolved P0/P1 Codex thread; and
-- no commit in the current branch's post-base ancestry was previously the head of a
-  closed unmerged pull request against that base.
+- no commit in the current branch's post-base ancestry, and no prior use of the
+  source branch itself, identifies a closed unmerged pull request against that base.
 
 Finding-free connector reviews may be represented by the bot's completed summary
 plus a pull-request thumbs-up. The gate accepts that shape only when the summary
@@ -53,8 +53,9 @@ review. The gate accepts that final remediation only when the reviewed commit is
 an ancestor of the current head and no blocking Codex thread remains unresolved.
 Advisory findings do not require another review, thread resolution, or automatic
 follow-up issue. A clean or advisory-only review never authorizes later unreviewed
-changes. More than two completed Codex reviews fail the gate, and adding commits
-on top of a closed unmerged pull-request head cannot reset that budget.
+changes. More than two completed Codex reviews fail the gate. Adding commits on
+top of a closed unmerged pull-request head, or rewriting that source branch,
+cannot reset the budget.
 
 Consumers keep a small event wrapper and pin the reusable workflow to a full
 commit SHA:

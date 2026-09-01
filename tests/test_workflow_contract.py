@@ -52,7 +52,7 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("reconcile-threads:", GATE)
         self.assertIn("github.event_name != 'push'", GATE)
         self.assertIn("Unresolved blocking Codex review thread remains", GATE)
-        self.assertIn('test("\\\\[(P0|P1)\\\\]"; "i")', GATE)
+        self.assertIn('test("\\\\[(P0|P1)( Badge)?\\\\]"; "i")', GATE)
         reconcile = GATE[GATE.index("  reconcile-threads:") :]
         self.assertNotIn("publish_status success", reconcile)
 
@@ -318,13 +318,15 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("associatedPullRequests(first: 100)", GATE)
         self.assertIn(".state == \"CLOSED\" and .mergedAt == null", GATE)
         self.assertIn("($history | map(.oid == $base_sha) | index(true))", GATE)
+        self.assertIn("pulls?state=closed&base=$BASE_BRANCH&per_page=100", GATE)
+        self.assertIn('select((.head.ref // "") == $head_ref)', GATE)
         self.assertIn("Review-budget reset detected", GATE)
 
     def test_severity_classifier_blocks_only_p0_and_p1(self) -> None:
-        program = r'''[.[] | select((.body // "") | test("\\[(P0|P1)\\]"; "i"))] | length'''
+        program = r'''[.[] | select((.body // "") | test("\\[(P0|P1)( Badge)?\\]"; "i"))] | length'''
         comments = [
             {"body": "[P0] data loss"},
-            {"body": "[P1] regression"},
+            {"body": "![P1 Badge](https://img.shields.io/badge/P1-orange) regression"},
             {"body": "[P2] edge case"},
             {"body": "[P3] cleanup"},
             {"body": "unlabelled suggestion"},
@@ -374,6 +376,36 @@ class WorkflowContractTests(unittest.TestCase):
             ["jq", "--argjson", "current_pr", "10", "--arg", "base_sha", "base",
              "--arg", "base", "main", program],
             input=json.dumps(data),
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+
+        self.assertEqual([9], json.loads(result.stdout))
+
+    def test_replacement_classifier_finds_rewritten_source_branch(self) -> None:
+        program = r'''
+          [add[]?
+            | select(.number != $current_pr)
+            | select((.base.ref // "") == $base)
+            | select((.head.ref // "") == $head_ref)
+            | select(.merged_at == null)
+            | .number]
+          | unique
+        '''
+        pages = [[
+            {"number": 9, "head": {"ref": "fix/review"}, "base": {"ref": "main"},
+             "merged_at": None},
+            {"number": 8, "head": {"ref": "fix/review"}, "base": {"ref": "main"},
+             "merged_at": "2026-01-01T00:00:00Z"},
+            {"number": 7, "head": {"ref": "other"}, "base": {"ref": "main"},
+             "merged_at": None},
+        ]]
+
+        result = subprocess.run(
+            ["jq", "--argjson", "current_pr", "10", "--arg", "head_ref", "fix/review",
+             "--arg", "base", "main", program],
+            input=json.dumps(pages),
             text=True,
             capture_output=True,
             check=True,

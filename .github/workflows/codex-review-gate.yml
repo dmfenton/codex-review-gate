@@ -199,6 +199,7 @@ jobs:
           head_sha="$(jq -r '.head.sha // ""' <<<"$pr_data")"
           base_sha="$(jq -r '.base.sha // ""' <<<"$pr_data")"
           head_repository="$(jq -r '.head.repo.full_name // ""' <<<"$pr_data")"
+          head_ref="$(jq -r '.head.ref // ""' <<<"$pr_data")"
           pr_state="$(jq -r '.state // ""' <<<"$pr_data")"
           pr_base="$(jq -r '.base.ref // ""' <<<"$pr_data")"
           pr_author="$(jq -r '.user.login // ""' <<<"$pr_data")"
@@ -210,6 +211,7 @@ jobs:
           [[ "$pr_state" == open ]] || fail_gate 'Only open pull requests can pass the gate.'
           [[ "$pr_base" == "$BASE_BRANCH" ]] || fail_gate "Pull request must target $BASE_BRANCH."
           [[ "$head_repository" == "$GITHUB_REPOSITORY" ]] || fail_gate 'Fork pull requests cannot use this privileged status gate.'
+          [[ -n "$head_ref" ]] || fail_gate 'The current pull request head branch is unavailable.'
           [[ "$pr_author" != 'dependabot[bot]' ]] || fail_gate 'Dependabot pull requests require a separate read-only policy.'
 
           owner="${GITHUB_REPOSITORY%%/*}"
@@ -257,6 +259,21 @@ jobs:
                 ]
               | unique
             ' <<<"$replacement_data")" || fail_gate 'Associated pull requests could not be normalized.'
+          closed_pr_pages="$(retry_api gh api --paginate --slurp \
+            "repos/$GITHUB_REPOSITORY/pulls?state=closed&base=$BASE_BRANCH&per_page=100")" || \
+            fail_gate 'Closed pull requests could not be read for replacement-branch auditing.'
+          rewritten_prs="$(jq --argjson current_pr "$PR_NUMBER" --arg head_ref "$head_ref" \
+            --arg base "$BASE_BRANCH" '
+              [add[]?
+                | select(.number != $current_pr)
+                | select((.base.ref // "") == $base)
+                | select((.head.ref // "") == $head_ref)
+                | select(.merged_at == null)
+                | .number]
+              | unique
+            ' <<<"$closed_pr_pages")" || fail_gate 'Replacement branch identities could not be normalized.'
+          replaced_prs="$(printf '%s\n%s\n' "$replaced_prs" "$rewritten_prs" | jq -sc 'add | unique')" || \
+            fail_gate 'Replacement pull-request evidence could not be combined.'
           [[ "$(jq length <<<"$replaced_prs")" == 0 ]] || \
             fail_gate "Review-budget reset detected: current branch descends from head/base previously closed unmerged in PR(s) $(jq -r 'join(", ")' <<<"$replaced_prs"). Reopen the original pull request or ask the owner."
 
@@ -370,11 +387,11 @@ jobs:
           blocking_findings="$(jq --argjson review_id "$latest_review_id" --argjson review "$latest_review" '
             [
               ($review
-                | select((.body // "") | test("\\[(P0|P1)\\]"; "i"))),
+                | select((.body // "") | test("\\[(P0|P1)( Badge)?\\]"; "i"))),
               (add[]?
                 | select(.pull_request_review_id == $review_id)
                 | select((.user.login // "") | IN("chatgpt-codex-connector", "chatgpt-codex-connector[bot]"))
-                | select((.body // "") | test("\\[(P0|P1)\\]"; "i")))
+                | select((.body // "") | test("\\[(P0|P1)( Badge)?\\]"; "i")))
             ]
             | length
           ' <<<"$review_comment_pages")" || fail_gate 'Blocking Codex findings could not be normalized.'
@@ -453,7 +470,7 @@ jobs:
               | select(.isResolved | not)
               | select(any(.comments.nodes[]?;
                   ((.author.login // "") | IN("chatgpt-codex-connector", "chatgpt-codex-connector[bot]")) and
-                  ((.body // "") | test("\\[(P0|P1)\\]"; "i"))))]
+                  ((.body // "") | test("\\[(P0|P1)( Badge)?\\]"; "i"))))]
             | length
           ' <<<"$thread_data")"
           (( unresolved_blocking == 0 )) || \
@@ -552,7 +569,7 @@ jobs:
                 | select(.isResolved | not)
                 | select(any(.comments.nodes[]?;
                     ((.author.login // "") | IN("chatgpt-codex-connector", "chatgpt-codex-connector[bot]")) and
-                    ((.body // "") | test("\\[(P0|P1)\\]"; "i"))))]
+                    ((.body // "") | test("\\[(P0|P1)( Badge)?\\]"; "i"))))]
               | length
             ' <<<"$thread_data")"
 
