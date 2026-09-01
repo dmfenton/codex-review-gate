@@ -212,6 +212,22 @@ jobs:
           [[ "$head_repository" == "$GITHUB_REPOSITORY" ]] || fail_gate 'Fork pull requests cannot use this privileged status gate.'
           [[ "$pr_author" != 'dependabot[bot]' ]] || fail_gate 'Dependabot pull requests require a separate read-only policy.'
 
+          associated_pr_pages="$(retry_api gh api --paginate --slurp \
+            "repos/$GITHUB_REPOSITORY/commits/$head_sha/pulls?per_page=100")" || \
+            fail_gate 'Pull requests associated with the current head could not be read.'
+          replaced_prs="$(jq --argjson current_pr "$PR_NUMBER" --arg head_sha "$head_sha" \
+            --arg base "$BASE_BRANCH" '
+              [add[]?
+                | select(.number != $current_pr)
+                | select((.head.sha // "") == $head_sha)
+                | select((.base.ref // "") == $base)
+                | select(.state == "closed" and .merged_at == null)]
+              | map(.number)
+              | unique
+            ' <<<"$associated_pr_pages")" || fail_gate 'Associated pull requests could not be normalized.'
+          [[ "$(jq length <<<"$replaced_prs")" == 0 ]] || \
+            fail_gate "Review-budget reset detected: identical head/base previously closed unmerged in PR(s) $(jq -r 'join(", ")' <<<"$replaced_prs"). Reopen the original pull request or ask the owner."
+
           issue_pages="$(retry_api gh api --paginate --slurp \
             "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments?per_page=100")" || \
             fail_gate 'Pull request conversation comments could not be read.'
@@ -319,6 +335,17 @@ jobs:
               | select((.user.login // "") | IN("chatgpt-codex-connector", "chatgpt-codex-connector[bot]"))]
             | length
           ' <<<"$review_comment_pages")" || fail_gate 'Codex inline review comments could not be normalized.'
+          blocking_findings="$(jq --argjson review_id "$latest_review_id" --argjson review "$latest_review" '
+            [
+              ($review
+                | select((.body // "") | test("\\[(P0|P1)\\]"; "i"))),
+              (add[]?
+                | select(.pull_request_review_id == $review_id)
+                | select((.user.login // "") | IN("chatgpt-codex-connector", "chatgpt-codex-connector[bot]"))
+                | select((.body // "") | test("\\[(P0|P1)\\]"; "i")))
+            ]
+            | length
+          ' <<<"$review_comment_pages")" || fail_gate 'Blocking Codex findings could not be normalized.'
           clean_review="$(jq -r --argjson inline_findings "$inline_findings" '
             (.body | test("Codex Review: Didn.t find any major issues"; "i")) or
             (.kind == "summary") or
@@ -331,10 +358,14 @@ jobs:
           reviewed_sha="$(retry_api gh api "repos/$GITHUB_REPOSITORY/commits/$reviewed_ref" --jq .sha 2>/dev/null || true)"
           review_outcome='exact-head clean review'
           if [[ "$reviewed_sha" == "$head_sha" ]]; then
-            [[ "$clean_review" == true ]] || fail_gate 'The latest Codex review contains findings.'
+            (( blocking_findings == 0 )) || \
+              fail_gate "The latest Codex review contains $blocking_findings blocking P0/P1 finding(s)."
+            if [[ "$clean_review" != true ]]; then
+              review_outcome='exact-head advisory findings accepted'
+            fi
           else
-            [[ "$clean_review" == false ]] || \
-              fail_gate "The latest clean Codex review does not cover current head $head_sha."
+            (( blocking_findings > 0 )) || \
+              fail_gate "The latest Codex review has no blocking findings and does not cover current head $head_sha."
             (( review_rounds == MAX_REVIEW_ROUNDS )) || \
               fail_gate "The latest Codex review does not cover current head $head_sha. One final review round remains."
             compare_status="$(retry_api gh api \
@@ -372,7 +403,7 @@ jobs:
                       isResolved
                       comments(first: 100) {
                         pageInfo { hasNextPage }
-                        nodes { author { login } }
+                        nodes { author { login } body }
                       }
                     }
                   }
@@ -387,24 +418,28 @@ jobs:
           ' <<<"$thread_data")"
           [[ "$truncated" == false ]] || fail_gate 'Review-thread pagination exceeded the fail-closed audit limit.'
 
-          unresolved="$(jq '
+          unresolved_blocking="$(jq '
             [.data.repository.pullRequest.reviewThreads.nodes[]
               | select(.isResolved | not)
-              | .comments.nodes[]
-              | select((.author.login // "") | IN("chatgpt-codex-connector", "chatgpt-codex-connector[bot]"))]
+              | select(any(.comments.nodes[]?;
+                  ((.author.login // "") | IN("chatgpt-codex-connector", "chatgpt-codex-connector[bot]")) and
+                  ((.body // "") | test("\\[(P0|P1)\\]"; "i"))))]
             | length
           ' <<<"$thread_data")"
-          (( unresolved == 0 )) || fail_gate "$unresolved unresolved Codex review thread comment(s) remain."
+          (( unresolved_blocking == 0 )) || \
+            fail_gate "$unresolved_blocking unresolved blocking Codex review thread(s) remain."
 
           if [[ "$review_outcome" == 'exact-head clean review' ]]; then
             publish_status success 'Exact-head Codex review is clean'
+          elif [[ "$review_outcome" == 'exact-head advisory findings accepted' ]]; then
+            publish_status success 'Exact-head review has advisory findings only'
           else
             publish_status success 'Final review findings are remediated'
           fi
           finalized=true
-          printf '### Codex review gate: passed\n\n- PR: #%s\n- Head: %s\n- Base: %s\n- Review rounds: %s/%s\n- Outcome: %s\n- Unresolved Codex threads: 0\n' \
+          printf '### Codex review gate: passed\n\n- PR: #%s\n- Head: %s\n- Base: %s\n- Review rounds: %s/%s\n- Outcome: %s\n- Blocking findings: %s\n- Unresolved blocking Codex threads: 0\n' \
             "$PR_NUMBER" "$head_sha" "$base_sha" "$review_rounds" "$MAX_REVIEW_ROUNDS" \
-            "$review_outcome" >> "$GITHUB_STEP_SUMMARY"
+            "$review_outcome" "$blocking_findings" >> "$GITHUB_STEP_SUMMARY"
 
   reconcile-threads:
     if: inputs.pr_number == '0' && github.event_name != 'push'
@@ -413,7 +448,7 @@ jobs:
       cancel-in-progress: true
     runs-on: ${{ fromJSON(inputs.runner_labels_json) }}
     steps:
-      - name: Fail heads with unresolved Codex threads
+      - name: Fail heads with unresolved blocking Codex threads
         env:
           BASE_BRANCH: ${{ inputs.base_branch }}
           GH_TOKEN: ${{ github.token }}
@@ -465,7 +500,7 @@ jobs:
                         isResolved
                         comments(first: 100) {
                           pageInfo { hasNextPage }
-                          nodes { author { login } }
+                          nodes { author { login } body }
                         }
                       }
                     }
@@ -482,19 +517,20 @@ jobs:
                (.data.repository.pullRequest.reviewThreads.nodes[].comments.pageInfo.hasNextPage)]
               | any
             ' <<<"$thread_data")"
-            unresolved="$(jq '
+            unresolved_blocking="$(jq '
               [.data.repository.pullRequest.reviewThreads.nodes[]
                 | select(.isResolved | not)
-                | .comments.nodes[]
-                | select((.author.login // "") | IN("chatgpt-codex-connector", "chatgpt-codex-connector[bot]"))]
+                | select(any(.comments.nodes[]?;
+                    ((.author.login // "") | IN("chatgpt-codex-connector", "chatgpt-codex-connector[bot]")) and
+                    ((.body // "") | test("\\[(P0|P1)\\]"; "i"))))]
               | length
             ' <<<"$thread_data")"
 
             if [[ "$truncated" != false ]]; then
               publish_failure "$head_sha" 'Thread reconciliation exceeded audit limit'
               invalidated=$((invalidated + 1))
-            elif (( unresolved > 0 )); then
-              publish_failure "$head_sha" 'Unresolved Codex review thread remains'
+            elif (( unresolved_blocking > 0 )); then
+              publish_failure "$head_sha" 'Unresolved blocking Codex review thread remains'
               invalidated=$((invalidated + 1))
             fi
           done < <(jq -r '

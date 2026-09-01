@@ -5,12 +5,13 @@ Shared fail-closed GitHub Actions enforcement for Codex pull-request feedback.
 The gate remains automatic. It publishes the `Codex review gate` commit status
 on the live pull-request head and succeeds only when all of these are true:
 
-- the latest Codex review is clean and covers the exact current head SHA;
+- the latest Codex review covers the exact current head SHA and contains no P0/P1 finding;
 - or, after the second and final review reports findings, the current head is a
-  descendant that addresses them and all Codex threads are resolved;
+  descendant that addresses its P0/P1 findings and all blocking Codex threads are resolved;
 - the review happened after the current base commit;
 - the pull request head and base stay unchanged during the audit; and
-- live GraphQL `reviewThreads` contains no unresolved Codex thread.
+- live GraphQL `reviewThreads` contains no unresolved P0/P1 Codex thread; and
+- the identical head and base were not previously closed unmerged in another pull request.
 
 Finding-free connector reviews may be represented by the bot's completed summary
 plus a pull-request thumbs-up. The gate accepts that shape only when the summary
@@ -25,7 +26,7 @@ same commit. Stale, user-authored, running, unbound, and over-budget signals fai
 closed.
 
 The workflow does not post comments or redispatch itself. An hourly self-hosted
-sentinel fails any PR head with a reopened or otherwise unresolved Codex thread;
+sentinel fails any PR head with a reopened or otherwise unresolved P0/P1 Codex thread;
 it never publishes success. This backstops GitHub Actions' lack of a review-thread
 resolution trigger without generating another Codex review. A base-branch
 push runs one shared discovery job and fans out invalidation jobs inside that
@@ -41,15 +42,18 @@ current PR instead of waiting for the hourly sentinel.
 Closing a pull request also runs the audit so its commit-scoped success is
 replaced with failure before the head SHA can be reused by another PR.
 
-Review work is capped at two Codex rounds. Request the first review only after
-implementation and checks are complete. If it reports findings, address all of
-them together and request one final review. If that final review finds more,
-address those findings, resolve the corresponding threads, rerun the repository
-checks, and manually dispatch the gate without requesting a third review. The
-gate accepts that final remediation only when the reviewed commit is an ancestor
-of the current head and no Codex thread remains unresolved. A clean review never
-authorizes later unreviewed changes. More than two completed Codex reviews fail
-the gate instead of silently extending the review budget.
+Review work is capped at two Codex rounds. P0/P1 findings are blocking; P2/P3
+findings are advisory even when valid. Request the first review only after
+implementation and checks are complete. If it reports blocking findings, address
+them together and request one final review. If that final review finds more
+blockers, address them, resolve the corresponding blocking threads, rerun the
+repository checks, and manually dispatch the gate without requesting a third
+review. The gate accepts that final remediation only when the reviewed commit is
+an ancestor of the current head and no blocking Codex thread remains unresolved.
+Advisory findings do not require another review, thread resolution, or automatic
+follow-up issue. A clean or advisory-only review never authorizes later unreviewed
+changes. More than two completed Codex reviews fail the gate, and an identical
+head/base from a closed unmerged pull request cannot reset that budget.
 
 Consumers keep a small event wrapper and pin the reusable workflow to a full
 commit SHA:
