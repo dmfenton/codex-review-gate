@@ -313,9 +313,11 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("exact-head advisory findings accepted", GATE)
         self.assertIn("Exact-head review has advisory findings only", GATE)
 
-    def test_identical_closed_unmerged_head_cannot_reset_budget(self) -> None:
-        self.assertIn("commits/$head_sha/pulls?per_page=100", GATE)
-        self.assertIn(".state == \"closed\" and .merged_at == null", GATE)
+    def test_closed_unmerged_ancestor_head_cannot_reset_budget(self) -> None:
+        self.assertIn("history(first: 100)", GATE)
+        self.assertIn("associatedPullRequests(first: 100)", GATE)
+        self.assertIn(".state == \"CLOSED\" and .mergedAt == null", GATE)
+        self.assertIn("($history | map(.oid == $base_sha) | index(true))", GATE)
         self.assertIn("Review-budget reset detected", GATE)
 
     def test_severity_classifier_blocks_only_p0_and_p1(self) -> None:
@@ -338,29 +340,40 @@ class WorkflowContractTests(unittest.TestCase):
 
         self.assertEqual("2", result.stdout.strip())
 
-    def test_replacement_classifier_ignores_merged_and_different_heads(self) -> None:
+    def test_replacement_classifier_finds_closed_unmerged_ancestor_head(self) -> None:
         program = r'''
-          [add[]?
-            | select(.number != $current_pr)
-            | select((.head.sha // "") == $head_sha)
-            | select((.base.ref // "") == $base)
-            | select(.state == "closed" and .merged_at == null)]
-          | map(.number)
+          .data.repository.object.history.nodes as $history
+          | ($history | map(.oid == $base_sha) | index(true)) as $base_index
+          | [
+              $history[:($base_index // ($history | length))][]
+              | .oid as $commit_oid
+              | .associatedPullRequests.nodes[]?
+              | select(.number != $current_pr)
+              | select((.headRefOid // "") == $commit_oid)
+              | select((.baseRefName // "") == $base)
+              | select(.state == "CLOSED" and .mergedAt == null)
+              | .number
+            ]
           | unique
         '''
-        pages = [[
-            {"number": 9, "head": {"sha": "abc"}, "base": {"ref": "main"},
-             "state": "closed", "merged_at": None},
-            {"number": 8, "head": {"sha": "abc"}, "base": {"ref": "main"},
-             "state": "closed", "merged_at": "2026-01-01T00:00:00Z"},
-            {"number": 7, "head": {"sha": "def"}, "base": {"ref": "main"},
-             "state": "closed", "merged_at": None},
-        ]]
+        data = {"data": {"repository": {"object": {"history": {"nodes": [
+            {"oid": "new", "associatedPullRequests": {"nodes": []}},
+            {"oid": "old", "associatedPullRequests": {"nodes": [
+                {"number": 9, "headRefOid": "old", "baseRefName": "main",
+                 "state": "CLOSED", "mergedAt": None},
+                {"number": 8, "headRefOid": "old", "baseRefName": "main",
+                 "state": "MERGED", "mergedAt": "2026-01-01T00:00:00Z"},
+            ]}},
+            {"oid": "base", "associatedPullRequests": {"nodes": [
+                {"number": 7, "headRefOid": "base", "baseRefName": "main",
+                 "state": "CLOSED", "mergedAt": None},
+            ]}},
+        ]}}}}}
 
         result = subprocess.run(
-            ["jq", "--argjson", "current_pr", "10", "--arg", "head_sha", "abc",
+            ["jq", "--argjson", "current_pr", "10", "--arg", "base_sha", "base",
              "--arg", "base", "main", program],
-            input=json.dumps(pages),
+            input=json.dumps(data),
             text=True,
             capture_output=True,
             check=True,

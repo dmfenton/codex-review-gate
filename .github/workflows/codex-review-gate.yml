@@ -212,21 +212,53 @@ jobs:
           [[ "$head_repository" == "$GITHUB_REPOSITORY" ]] || fail_gate 'Fork pull requests cannot use this privileged status gate.'
           [[ "$pr_author" != 'dependabot[bot]' ]] || fail_gate 'Dependabot pull requests require a separate read-only policy.'
 
-          associated_pr_pages="$(retry_api gh api --paginate --slurp \
-            "repos/$GITHUB_REPOSITORY/commits/$head_sha/pulls?per_page=100")" || \
-            fail_gate 'Pull requests associated with the current head could not be read.'
-          replaced_prs="$(jq --argjson current_pr "$PR_NUMBER" --arg head_sha "$head_sha" \
+          owner="${GITHUB_REPOSITORY%%/*}"
+          repository="${GITHUB_REPOSITORY#*/}"
+          replacement_data="$(retry_api gh api graphql \
+            -F owner="$owner" -F name="$repository" -F oid="$head_sha" \
+            -f query="query(\$owner: String!, \$name: String!, \$oid: GitObjectID!) {
+              repository(owner: \$owner, name: \$name) {
+                object(oid: \$oid) {
+                  ... on Commit {
+                    history(first: 100) {
+                      pageInfo { hasNextPage }
+                      nodes {
+                        oid
+                        associatedPullRequests(first: 100) {
+                          pageInfo { hasNextPage }
+                          nodes { number state mergedAt baseRefName headRefOid }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }")" || fail_gate 'Pull requests associated with the current branch history could not be read.'
+          replacement_truncated="$(jq --arg base_sha "$base_sha" '
+            (.data.repository.object.history.nodes | map(.oid == $base_sha) | any) as $base_found
+            | (.data.repository.object.history.pageInfo.hasNextPage and ($base_found | not)) or
+              ([.data.repository.object.history.nodes[].associatedPullRequests.pageInfo.hasNextPage] | any)
+          ' <<<"$replacement_data")" || fail_gate 'Replacement pull-request pagination could not be audited.'
+          [[ "$replacement_truncated" == false ]] || \
+            fail_gate 'Replacement pull-request history exceeded the fail-closed audit limit.'
+          replaced_prs="$(jq --argjson current_pr "$PR_NUMBER" --arg base_sha "$base_sha" \
             --arg base "$BASE_BRANCH" '
-              [add[]?
-                | select(.number != $current_pr)
-                | select((.head.sha // "") == $head_sha)
-                | select((.base.ref // "") == $base)
-                | select(.state == "closed" and .merged_at == null)]
-              | map(.number)
+              .data.repository.object.history.nodes as $history
+              | ($history | map(.oid == $base_sha) | index(true)) as $base_index
+              | [
+                  $history[:($base_index // ($history | length))][]
+                  | .oid as $commit_oid
+                  | .associatedPullRequests.nodes[]?
+                  | select(.number != $current_pr)
+                  | select((.headRefOid // "") == $commit_oid)
+                  | select((.baseRefName // "") == $base)
+                  | select(.state == "CLOSED" and .mergedAt == null)
+                  | .number
+                ]
               | unique
-            ' <<<"$associated_pr_pages")" || fail_gate 'Associated pull requests could not be normalized.'
+            ' <<<"$replacement_data")" || fail_gate 'Associated pull requests could not be normalized.'
           [[ "$(jq length <<<"$replaced_prs")" == 0 ]] || \
-            fail_gate "Review-budget reset detected: identical head/base previously closed unmerged in PR(s) $(jq -r 'join(", ")' <<<"$replaced_prs"). Reopen the original pull request or ask the owner."
+            fail_gate "Review-budget reset detected: current branch descends from head/base previously closed unmerged in PR(s) $(jq -r 'join(", ")' <<<"$replaced_prs"). Reopen the original pull request or ask the owner."
 
           issue_pages="$(retry_api gh api --paginate --slurp \
             "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments?per_page=100")" || \
@@ -390,8 +422,6 @@ jobs:
           [[ "$current_head" == "$head_sha" && "$current_base" == "$base_sha" && "$current_state" == open ]] || \
             fail_gate 'Pull request head, base, or state changed during the audit.'
 
-          owner="${GITHUB_REPOSITORY%%/*}"
-          repository="${GITHUB_REPOSITORY#*/}"
           thread_data="$(retry_api gh api graphql \
             -F owner="$owner" -F name="$repository" -F number="$PR_NUMBER" \
             -f query="query(\$owner: String!, \$name: String!, \$number: Int!) {
