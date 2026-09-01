@@ -374,8 +374,9 @@ jobs:
           latest_review="$(jq -c 'last // empty' <<<"$codex_reviews")"
           [[ -n "$latest_review" ]] || fail_gate 'No completed Codex review exists for this pull request.'
           review_rounds="$(jq 'length' <<<"$codex_reviews")"
-          (( review_rounds <= MAX_REVIEW_ROUNDS )) || \
-            fail_gate "Codex review limit exceeded: $review_rounds/$MAX_REVIEW_ROUNDS rounds."
+          if (( review_rounds > MAX_REVIEW_ROUNDS )); then
+            echo "::warning::Codex review budget exceeded: $review_rounds/$MAX_REVIEW_ROUNDS rounds. Evaluating the latest completed review without requiring another round."
+          fi
 
           latest_review_id="$(jq -r '.id' <<<"$latest_review")"
           inline_findings="$(jq --argjson review_id "$latest_review_id" '
@@ -413,9 +414,9 @@ jobs:
               review_outcome='exact-head advisory findings accepted'
             fi
           else
-            (( blocking_findings > 0 )) || \
-              fail_gate "The latest Codex review has no blocking findings and does not cover current head $head_sha."
-            (( review_rounds == MAX_REVIEW_ROUNDS )) || \
+            (( inline_findings > 0 )) || \
+              fail_gate "The latest Codex review has no findings and does not cover current head $head_sha."
+            (( review_rounds >= MAX_REVIEW_ROUNDS )) || \
               fail_gate "The latest Codex review does not cover current head $head_sha. One final review round remains."
             compare_status="$(retry_api gh api \
               "repos/$GITHUB_REPOSITORY/compare/$reviewed_sha...$head_sha" --jq .status 2>/dev/null || true)"

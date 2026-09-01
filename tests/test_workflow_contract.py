@@ -66,13 +66,14 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("unresolved blocking Codex review thread", GATE)
         self.assertIn("The base branch advanced after the latest Codex review", GATE)
 
-    def test_gate_caps_review_rounds_with_bounded_remediation(self) -> None:
+    def test_gate_warns_on_extra_rounds_and_accepts_bounded_remediation(self) -> None:
         self.assertNotIn("max_review_rounds:", GATE)
         self.assertIn("MAX_REVIEW_ROUNDS: 2", GATE)
         self.assertIn("review_rounds=\"$(jq 'length'", GATE)
-        self.assertIn("review_rounds <= MAX_REVIEW_ROUNDS", GATE)
-        self.assertIn("review_rounds == MAX_REVIEW_ROUNDS", GATE)
-        self.assertIn("Codex review limit exceeded", GATE)
+        self.assertIn("review_rounds > MAX_REVIEW_ROUNDS", GATE)
+        self.assertIn("review_rounds >= MAX_REVIEW_ROUNDS", GATE)
+        self.assertIn("Codex review budget exceeded", GATE)
+        self.assertNotIn('fail_gate "Codex review limit exceeded', GATE)
         self.assertIn("compare/$reviewed_sha...$head_sha", GATE)
         self.assertIn('[[ "$compare_status" == ahead ]]', GATE)
         self.assertIn("final-round findings remediated", GATE)
@@ -303,8 +304,9 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertEqual(4, len(repeated_normalized))
         self.assertEqual("d6caf508f0", repeated_normalized[-1]["reviewed_ref"])
 
-    def test_bounded_remediation_requires_blockers_and_resolved_blocking_threads(self) -> None:
-        self.assertIn("(( blocking_findings > 0 ))", GATE)
+    def test_bounded_remediation_requires_findings_and_resolved_blocking_threads(self) -> None:
+        self.assertIn("(( inline_findings > 0 ))", GATE)
+        self.assertNotIn("(( blocking_findings > 0 ))", GATE)
         self.assertIn("current head is not a remediation descendant", GATE)
         self.assertIn("(( unresolved_blocking == 0 ))", GATE)
 
