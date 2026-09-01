@@ -48,10 +48,11 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertNotIn("gh workflow run", GATE)
         self.assertNotIn("reconcile-open-pull-requests", GATE)
 
-    def test_hourly_reconciliation_only_fails_unresolved_threads(self) -> None:
+    def test_hourly_reconciliation_only_fails_unresolved_blocking_threads(self) -> None:
         self.assertIn("reconcile-threads:", GATE)
         self.assertIn("github.event_name != 'push'", GATE)
-        self.assertIn("Unresolved Codex review thread remains", GATE)
+        self.assertIn("Unresolved blocking Codex review thread remains", GATE)
+        self.assertIn('test("\\\\[(P0|P1)( Badge)?\\\\]"; "i")', GATE)
         reconcile = GATE[GATE.index("  reconcile-threads:") :]
         self.assertNotIn("publish_status success", reconcile)
 
@@ -62,7 +63,7 @@ class WorkflowContractTests(unittest.TestCase):
     def test_gate_requires_exact_head_and_live_threads(self) -> None:
         self.assertIn('if [[ "$reviewed_sha" == "$head_sha" ]]', GATE)
         self.assertIn("reviewThreads(first: 100)", GATE)
-        self.assertIn("unresolved Codex review thread", GATE)
+        self.assertIn("unresolved blocking Codex review thread", GATE)
         self.assertIn("The base branch advanced after the latest Codex review", GATE)
 
     def test_gate_caps_review_rounds_with_bounded_remediation(self) -> None:
@@ -302,10 +303,115 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertEqual(4, len(repeated_normalized))
         self.assertEqual("d6caf508f0", repeated_normalized[-1]["reviewed_ref"])
 
-    def test_bounded_remediation_requires_findings_and_resolved_threads(self) -> None:
-        self.assertIn('[[ "$clean_review" == false ]]', GATE)
+    def test_bounded_remediation_requires_blockers_and_resolved_blocking_threads(self) -> None:
+        self.assertIn("(( blocking_findings > 0 ))", GATE)
         self.assertIn("current head is not a remediation descendant", GATE)
-        self.assertIn("(( unresolved == 0 ))", GATE)
+        self.assertIn("(( unresolved_blocking == 0 ))", GATE)
+
+    def test_advisory_findings_do_not_block_exact_head(self) -> None:
+        self.assertIn("(( blocking_findings == 0 ))", GATE)
+        self.assertIn("exact-head advisory findings accepted", GATE)
+        self.assertIn("Exact-head review has advisory findings only", GATE)
+
+    def test_closed_unmerged_ancestor_head_cannot_reset_budget(self) -> None:
+        self.assertIn("history(first: 100)", GATE)
+        self.assertIn("associatedPullRequests(first: 100)", GATE)
+        self.assertIn(".state == \"CLOSED\" and .mergedAt == null", GATE)
+        self.assertIn("($history | map(.oid == $base_sha) | index(true))", GATE)
+        self.assertIn("pulls?state=closed&base=$BASE_BRANCH&per_page=100", GATE)
+        self.assertIn('select((.head.ref // "") == $head_ref)', GATE)
+        self.assertIn("Review-budget reset detected", GATE)
+
+    def test_severity_classifier_blocks_only_p0_and_p1(self) -> None:
+        program = r'''[.[] | select((.body // "") | test("\\[(P0|P1)( Badge)?\\]"; "i"))] | length'''
+        comments = [
+            {"body": "[P0] data loss"},
+            {"body": "![P1 Badge](https://img.shields.io/badge/P1-orange) regression"},
+            {"body": "[P2] edge case"},
+            {"body": "[P3] cleanup"},
+            {"body": "unlabelled suggestion"},
+        ]
+
+        result = subprocess.run(
+            ["jq", program],
+            input=json.dumps(comments),
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+
+        self.assertEqual("2", result.stdout.strip())
+
+    def test_replacement_classifier_finds_closed_unmerged_ancestor_head(self) -> None:
+        program = r'''
+          .data.repository.object.history.nodes as $history
+          | ($history | map(.oid == $base_sha) | index(true)) as $base_index
+          | [
+              $history[:($base_index // ($history | length))][]
+              | .oid as $commit_oid
+              | .associatedPullRequests.nodes[]?
+              | select(.number != $current_pr)
+              | select((.headRefOid // "") == $commit_oid)
+              | select((.baseRefName // "") == $base)
+              | select(.state == "CLOSED" and .mergedAt == null)
+              | .number
+            ]
+          | unique
+        '''
+        data = {"data": {"repository": {"object": {"history": {"nodes": [
+            {"oid": "new", "associatedPullRequests": {"nodes": []}},
+            {"oid": "old", "associatedPullRequests": {"nodes": [
+                {"number": 9, "headRefOid": "old", "baseRefName": "main",
+                 "state": "CLOSED", "mergedAt": None},
+                {"number": 8, "headRefOid": "old", "baseRefName": "main",
+                 "state": "MERGED", "mergedAt": "2026-01-01T00:00:00Z"},
+            ]}},
+            {"oid": "base", "associatedPullRequests": {"nodes": [
+                {"number": 7, "headRefOid": "base", "baseRefName": "main",
+                 "state": "CLOSED", "mergedAt": None},
+            ]}},
+        ]}}}}}
+
+        result = subprocess.run(
+            ["jq", "--argjson", "current_pr", "10", "--arg", "base_sha", "base",
+             "--arg", "base", "main", program],
+            input=json.dumps(data),
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+
+        self.assertEqual([9], json.loads(result.stdout))
+
+    def test_replacement_classifier_finds_rewritten_source_branch(self) -> None:
+        program = r'''
+          [add[]?
+            | select(.number != $current_pr)
+            | select((.base.ref // "") == $base)
+            | select((.head.ref // "") == $head_ref)
+            | select(.merged_at == null)
+            | .number]
+          | unique
+        '''
+        pages = [[
+            {"number": 9, "head": {"ref": "fix/review"}, "base": {"ref": "main"},
+             "merged_at": None},
+            {"number": 8, "head": {"ref": "fix/review"}, "base": {"ref": "main"},
+             "merged_at": "2026-01-01T00:00:00Z"},
+            {"number": 7, "head": {"ref": "other"}, "base": {"ref": "main"},
+             "merged_at": None},
+        ]]
+
+        result = subprocess.run(
+            ["jq", "--argjson", "current_pr", "10", "--arg", "head_ref", "fix/review",
+             "--arg", "base", "main", program],
+            input=json.dumps(pages),
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+
+        self.assertEqual([9], json.loads(result.stdout))
 
     def test_gate_streams_unbounded_review_records(self) -> None:
         self.assertIn("| jq -cs", GATE)
