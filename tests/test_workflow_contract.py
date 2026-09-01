@@ -304,9 +304,8 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertEqual(4, len(repeated_normalized))
         self.assertEqual("d6caf508f0", repeated_normalized[-1]["reviewed_ref"])
 
-    def test_bounded_remediation_requires_findings_and_resolved_blocking_threads(self) -> None:
-        self.assertIn("(( inline_findings > 0 ))", GATE)
-        self.assertNotIn("(( blocking_findings > 0 ))", GATE)
+    def test_bounded_remediation_requires_blockers_and_resolved_blocking_threads(self) -> None:
+        self.assertIn("(( blocking_findings > 0 ))", GATE)
         self.assertIn("current head is not a remediation descendant", GATE)
         self.assertIn("(( unresolved_blocking == 0 ))", GATE)
 
