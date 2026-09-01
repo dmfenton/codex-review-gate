@@ -23,8 +23,7 @@ the review budget; pending and failed attempts remain fail-closed until a
 completed outcome exists. A summary published within 30 seconds of an explicit
 completion for the same commit is the duplicate status artifact for that round.
 Separate completed outcomes remain separate rounds even when they review the
-same commit. Stale, user-authored, running, unbound, and over-budget signals fail
-closed.
+same commit. Stale, user-authored, running, and unbound signals fail closed.
 
 The workflow does not post comments or redispatch itself. An hourly self-hosted
 sentinel fails any PR head with a reopened or otherwise unresolved P0/P1 Codex thread;
@@ -43,19 +42,21 @@ current PR instead of waiting for the hourly sentinel.
 Closing a pull request also runs the audit so its commit-scoped success is
 replaced with failure before the head SHA can be reused by another PR.
 
-Review work is capped at two Codex rounds. P0/P1 findings are blocking; P2/P3
-findings are advisory even when valid. Request the first review only after
-implementation and checks are complete. If it reports blocking findings, address
-them together and request one final review. If that final review finds more
-blockers, address them, resolve the corresponding blocking threads, rerun the
-repository checks, and manually dispatch the gate without requesting a third
-review. The gate accepts that final remediation only when the reviewed commit is
-an ancestor of the current head and no blocking Codex thread remains unresolved.
+Review requests are capped by policy at two Codex rounds. P0/P1 findings are
+blocking; P2/P3 findings are advisory even when valid. Request the first review
+only after implementation and checks are complete. If it reports blocking
+findings, address them together and request one final review. If that final
+review finds more blockers, address them, resolve the corresponding blocking
+threads, rerun the repository checks, and manually dispatch the gate without
+requesting a third review. The gate accepts that final remediation only when
+the reviewed commit is an ancestor of the current head and no blocking Codex
+thread remains unresolved.
 Advisory findings do not require another review, thread resolution, or automatic
 follow-up issue. A clean or advisory-only review never authorizes later unreviewed
-changes. More than two completed Codex reviews fail the gate. Adding commits on
-top of a closed unmerged pull-request head, or rewriting that source branch,
-cannot reset the budget.
+changes. If more than two completed reviews already exist, the gate warns but
+evaluates the latest result; exceeding the request budget must never become a
+permanent merge blocker. Adding commits on top of a closed unmerged pull-request
+head, or rewriting that source branch, cannot reset the budget.
 
 Consumers keep a small event wrapper and pin the reusable workflow to a full
 commit SHA:
@@ -83,6 +84,7 @@ status context stays consistent across repositories.
 The connector's persistent `Codex Review Summary` status comment can prove a
 completed clean review, but duplicate records produced by that same review
 completion are one round. Only completed finding or clean-review outcomes count
-toward the hard two-round limit.
+toward the two-round request budget. Extra completed outcomes do not fail the
+gate.
 
 Validate changes with `scripts/validate.sh`.

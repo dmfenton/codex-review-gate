@@ -66,13 +66,14 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("unresolved blocking Codex review thread", GATE)
         self.assertIn("The base branch advanced after the latest Codex review", GATE)
 
-    def test_gate_caps_review_rounds_with_bounded_remediation(self) -> None:
+    def test_gate_warns_on_extra_rounds_and_accepts_bounded_remediation(self) -> None:
         self.assertNotIn("max_review_rounds:", GATE)
         self.assertIn("MAX_REVIEW_ROUNDS: 2", GATE)
         self.assertIn("review_rounds=\"$(jq 'length'", GATE)
-        self.assertIn("review_rounds <= MAX_REVIEW_ROUNDS", GATE)
-        self.assertIn("review_rounds == MAX_REVIEW_ROUNDS", GATE)
-        self.assertIn("Codex review limit exceeded", GATE)
+        self.assertIn("review_rounds > MAX_REVIEW_ROUNDS", GATE)
+        self.assertIn("review_rounds >= MAX_REVIEW_ROUNDS", GATE)
+        self.assertIn("Codex review budget exceeded", GATE)
+        self.assertNotIn('fail_gate "Codex review limit exceeded', GATE)
         self.assertIn("compare/$reviewed_sha...$head_sha", GATE)
         self.assertIn('[[ "$compare_status" == ahead ]]', GATE)
         self.assertIn("final-round findings remediated", GATE)
