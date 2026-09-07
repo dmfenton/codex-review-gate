@@ -414,23 +414,31 @@ jobs:
               review_outcome='exact-head advisory findings accepted'
             fi
           else
-            (( blocking_findings > 0 )) || \
-              fail_gate "The latest Codex review has no blocking findings and does not cover current head $head_sha."
+            # Review is capped at MAX_REVIEW_ROUNDS. Once the final round has completed,
+            # a later head merges as long as it descends from the reviewed commit and no
+            # blocking thread remains: a blocking fix, an advisory fix, or a merge of the
+            # base are all expected after the final round and never reopen review.
             (( review_rounds >= MAX_REVIEW_ROUNDS )) || \
               fail_gate "The latest Codex review does not cover current head $head_sha. One final review round remains."
             compare_status="$(retry_api gh api \
               "repos/$GITHUB_REPOSITORY/compare/$reviewed_sha...$head_sha" --jq .status 2>/dev/null || true)"
             [[ "$compare_status" == ahead ]] || \
-              fail_gate 'The current head is not a remediation descendant of the final reviewed commit.'
-            review_outcome='final-round findings remediated'
+              fail_gate 'The current head is not a descendant of the final reviewed commit.'
+            if (( blocking_findings > 0 )); then
+              review_outcome='final-round findings remediated'
+            else
+              review_outcome='final-round descendant accepted'
+            fi
           fi
 
           reviewed_at="$(jq -r '.occurred_at' <<<"$latest_review")"
           base_committed_at="$(retry_api gh api "repos/$GITHUB_REPOSITORY/commits/$base_sha" \
             --jq '.commit.committer.date // .commit.author.date')" || \
             fail_gate 'The current base commit time could not be read.'
+          # The base branch advancing after review is expected: the caller merges the base
+          # into the branch and dispatches the gate. It is worth a warning, not a block.
           [[ "$reviewed_at" > "$base_committed_at" || "$reviewed_at" == "$base_committed_at" ]] || \
-            fail_gate 'The base branch advanced after the latest Codex review.'
+            echo '::warning::The base branch advanced after the latest Codex review.'
 
           current_pr="$(retry_api gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER")" || \
             fail_gate 'Pull request state could not be revalidated.'
@@ -481,6 +489,8 @@ jobs:
             publish_status success 'Exact-head Codex review is clean'
           elif [[ "$review_outcome" == 'exact-head advisory findings accepted' ]]; then
             publish_status success 'Exact-head review has advisory findings only'
+          elif [[ "$review_outcome" == 'final-round descendant accepted' ]]; then
+            publish_status success 'Final round complete; descendant head accepted'
           else
             publish_status success 'Final review findings are remediated'
           fi

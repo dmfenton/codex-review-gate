@@ -42,20 +42,21 @@ current PR instead of waiting for the hourly sentinel.
 Closing a pull request also runs the audit so its commit-scoped success is
 replaced with failure before the head SHA can be reused by another PR.
 
-Review requests are capped by policy at two Codex rounds. P0/P1 findings are
-blocking; P2/P3 findings are advisory even when valid. Request the first review
-only after implementation and checks are complete. If it reports blocking
-findings, address them together and request one final review. If that final
-review finds more blockers, address them, resolve the corresponding blocking
-threads, rerun the repository checks, and manually dispatch the gate without
-requesting a third review. The gate accepts that final remediation only when
-the reviewed commit is an ancestor of the current head and no blocking Codex
-thread remains unresolved.
-Advisory findings do not require another review, thread resolution, or automatic
-follow-up issue. A clean or advisory-only review never authorizes later unreviewed
-changes. If more than two completed reviews already exist, the gate warns but
-evaluates the latest result; exceeding the request budget must never become a
-permanent merge blocker. Adding commits on top of a closed unmerged pull-request
+Review is capped by policy at two Codex rounds, then the pull request merges.
+P0/P1 findings are blocking; P2/P3 findings are advisory even when valid.
+Request the first review only after implementation and checks are complete.
+If it reports blocking findings, address them together and request one final
+review. After the final round, fix any blockers it reports, resolve the
+corresponding blocking threads, rerun the repository checks, and manually
+dispatch the gate; never request a third review. The gate then accepts any head
+that descends from the final reviewed commit with no unresolved blocking Codex
+thread, whether the later commits fix blockers, take advisory findings, or
+merge the base branch. Before the final round, an unreviewed head still needs
+its remaining round. Advisory findings never require another review, thread
+resolution, or a follow-up issue. If more than two completed reviews already
+exist, the gate warns but evaluates the latest result; exceeding the request
+budget must never become a permanent merge blocker. The base branch advancing
+after the latest review is a warning, not a block. Adding commits on top of a closed unmerged pull-request
 head, or rewriting that source branch, cannot reset the budget.
 
 Consumers keep a small event wrapper and pin the reusable workflow to a full
