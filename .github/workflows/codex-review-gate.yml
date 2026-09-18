@@ -414,18 +414,26 @@ jobs:
               review_outcome='exact-head advisory findings accepted'
             fi
           else
-            # Review is capped at MAX_REVIEW_ROUNDS. Once the final round has completed,
-            # a later head merges as long as it descends from the reviewed commit and no
-            # blocking thread remains: a blocking fix, an advisory fix, or a merge of the
-            # base are all expected after the final round and never reopen review.
-            (( review_rounds >= MAX_REVIEW_ROUNDS )) || \
-              fail_gate "The latest Codex review does not cover current head $head_sha. One final review round remains."
+            # A round is final when it reported nothing blocking, or when the budget is spent.
+            # The second review exists to re-examine blocking findings, so a review that found
+            # none is already the last one the policy asks for; demanding another round after a
+            # clean review failed every pull request whose only follow-up was an advisory fix.
+            # Once the final round has completed, a later head merges as long as it descends from
+            # the reviewed commit and no blocking thread remains: a blocking fix, an advisory fix,
+            # or a merge of the base are all expected after it and never reopen review.
+            if (( review_rounds < MAX_REVIEW_ROUNDS && blocking_findings > 0 )); then
+              fail_gate "The latest Codex review reported $blocking_findings blocking finding(s) and does not cover current head $head_sha. One final review round remains."
+            fi
             compare_status="$(retry_api gh api \
               "repos/$GITHUB_REPOSITORY/compare/$reviewed_sha...$head_sha" --jq .status 2>/dev/null || true)"
             [[ "$compare_status" == ahead ]] || \
               fail_gate 'The current head is not a descendant of the final reviewed commit.'
             if (( blocking_findings > 0 )); then
               review_outcome='final-round findings remediated'
+            elif (( review_rounds < MAX_REVIEW_ROUNDS )); then
+              # Say it out loud: these commits carry no review of their own.
+              echo "::warning::Head $head_sha descends from a Codex review that reported nothing blocking; the commits added since it were not reviewed."
+              review_outcome='clean-review descendant accepted'
             else
               review_outcome='final-round descendant accepted'
             fi
@@ -489,6 +497,8 @@ jobs:
             publish_status success 'Exact-head Codex review is clean'
           elif [[ "$review_outcome" == 'exact-head advisory findings accepted' ]]; then
             publish_status success 'Exact-head review has advisory findings only'
+          elif [[ "$review_outcome" == 'clean-review descendant accepted' ]]; then
+            publish_status success 'Clean review; commits added since it were not reviewed'
           elif [[ "$review_outcome" == 'final-round descendant accepted' ]]; then
             publish_status success 'Final round complete; descendant head accepted'
           else

@@ -6,8 +6,9 @@ The gate remains automatic. It publishes the `Codex review gate` commit status
 on the live pull-request head and succeeds only when all of these are true:
 
 - the latest Codex review covers the exact current head SHA and contains no P0/P1 finding;
-- or, after the second and final review reports findings, the current head is a
-  descendant that addresses its P0/P1 findings and all blocking Codex threads are resolved;
+- or, after the final review round, the current head is a descendant of the reviewed
+  commit and all blocking Codex threads are resolved. A round is final when it reported
+  no P0/P1 finding, or when the two-round budget is spent;
 - the review happened after the current base commit;
 - the pull request head and base stay unchanged during the audit; and
 - live GraphQL `reviewThreads` contains no unresolved P0/P1 Codex thread; and
@@ -51,8 +52,10 @@ corresponding blocking threads, rerun the repository checks, and manually
 dispatch the gate; never request a third review. The gate then accepts any head
 that descends from the final reviewed commit with no unresolved blocking Codex
 thread, whether the later commits fix blockers, take advisory findings, or
-merge the base branch. Before the final round, an unreviewed head still needs
-its remaining round. Advisory findings never require another review, thread
+merge the base branch. A review that reports no blocking finding is itself the
+final round, because the remaining round exists only to re-examine blockers; the
+gate warns that the later commits were not reviewed and accepts the descendant.
+A head that outruns a review which did report blockers still needs that round. Advisory findings never require another review, thread
 resolution, or a follow-up issue. If more than two completed reviews already
 exist, the gate warns but evaluates the latest result; exceeding the request
 budget must never become a permanent merge blocker. The base branch advancing

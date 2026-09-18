@@ -2,9 +2,9 @@
 
 - Finish implementation and required checks before requesting `@codex review`.
 - Codex is advisory except for explicit P0/P1 findings. A valid P2/P3 finding is not a release blocker by default.
-- Use at most two Codex review rounds per pull request. Address all blocking findings from a round together before requesting the second and final review.
+- Use at most two Codex review rounds per pull request. Address all blocking findings from a round together before requesting the second and final review. Request that second review when a round reported blocking findings; a round that reported none is already the final one.
 - After the second review, fix any blocking findings, rerun required checks, resolve only those blocking threads, and manually dispatch the gate; then merge. Never request a third review. A later head merges as long as it descends from the final reviewed commit and no blocking thread remains, whether it fixes blockers, takes advisory findings, or merges the base branch.
-- Before the two-round limit, any code change makes the existing review stale; finish the new final state before requesting the remaining review.
+- While a blocking finding is outstanding, any code change makes the existing review stale; finish the new final state before requesting the remaining review. After a round that reported no blocking finding, later commits merge on the descendant rule, and the gate records in both the run log and the published status that they carry no review of their own.
 - Reviewed pull requests target `main`; the gate must fail closed for every other base.
 - Merge only when the pinned `Codex review gate` status and all repository checks pass.
 - Immediately before merging, query the pull request's live `reviewThreads` state and require zero unresolved P0/P1 Codex threads.

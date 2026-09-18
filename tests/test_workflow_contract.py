@@ -72,7 +72,6 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("MAX_REVIEW_ROUNDS: 2", GATE)
         self.assertIn("review_rounds=\"$(jq 'length'", GATE)
         self.assertIn("review_rounds > MAX_REVIEW_ROUNDS", GATE)
-        self.assertIn("review_rounds >= MAX_REVIEW_ROUNDS", GATE)
         self.assertIn("Codex review budget exceeded", GATE)
         self.assertNotIn('fail_gate "Codex review limit exceeded', GATE)
         self.assertIn("compare/$reviewed_sha...$head_sha", GATE)
@@ -80,6 +79,7 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("final-round findings remediated", GATE)
         self.assertIn("final-round descendant accepted", GATE)
         self.assertIn("Final round complete; descendant head accepted", GATE)
+        self.assertIn("review_rounds < MAX_REVIEW_ROUNDS", GATE)
 
     def test_clean_review_summary_requires_timely_codex_reaction(self) -> None:
         self.assertIn(
@@ -309,12 +309,33 @@ class WorkflowContractTests(unittest.TestCase):
 
     def test_final_round_descendant_merges_on_resolved_blocking_threads(self) -> None:
         # After the final round, any descendant head merges; blockers only change the
-        # outcome label. An unreviewed head before the final round still needs it.
-        self.assertNotIn("has no blocking findings and does not cover current head", GATE)
-        self.assertIn("One final review round remains", GATE)
+        # outcome label. A head that outruns a review with blocking findings still
+        # needs the remaining round.
+        self.assertIn(
+            'reported $blocking_findings blocking finding(s) and does not cover '
+            "current head $head_sha. One final review round remains.",
+            GATE,
+        )
+        self.assertIn(
+            "(( review_rounds < MAX_REVIEW_ROUNDS && blocking_findings > 0 )); then", GATE
+        )
         self.assertIn("current head is not a descendant of the final reviewed commit", GATE)
         self.assertIn("(( blocking_findings > 0 )); then", GATE)
         self.assertIn("(( unresolved_blocking == 0 ))", GATE)
+
+    def test_review_without_blocking_findings_is_already_the_final_round(self) -> None:
+        # The second review exists to re-examine blocking findings. After a review that
+        # found none, an advisory fix merges on the descendant rule rather than burning
+        # the remaining round, and the unreviewed commits are called out in the log.
+        self.assertIn("clean-review descendant accepted", GATE)
+        # The published status and the run log both say the later commits are unreviewed.
+        self.assertIn("Clean review; commits added since it were not reviewed", GATE)
+        self.assertIn(
+            "descends from a Codex review that reported nothing blocking", GATE
+        )
+        self.assertNotIn(
+            'fail_gate "The latest Codex review does not cover current head', GATE
+        )
 
     def test_advisory_findings_do_not_block_exact_head(self) -> None:
         self.assertIn("(( blocking_findings == 0 ))", GATE)
