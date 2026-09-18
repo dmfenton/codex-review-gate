@@ -498,7 +498,7 @@ jobs:
           elif [[ "$review_outcome" == 'exact-head advisory findings accepted' ]]; then
             publish_status success 'Exact-head review has advisory findings only'
           elif [[ "$review_outcome" == 'clean-review descendant accepted' ]]; then
-            publish_status success 'Review found nothing blocking; descendant head accepted'
+            publish_status success 'Clean review; commits added since it were not reviewed'
           elif [[ "$review_outcome" == 'final-round descendant accepted' ]]; then
             publish_status success 'Final round complete; descendant head accepted'
           else

@@ -328,7 +328,8 @@ class WorkflowContractTests(unittest.TestCase):
         # found none, an advisory fix merges on the descendant rule rather than burning
         # the remaining round, and the unreviewed commits are called out in the log.
         self.assertIn("clean-review descendant accepted", GATE)
-        self.assertIn("Review found nothing blocking; descendant head accepted", GATE)
+        # The published status and the run log both say the later commits are unreviewed.
+        self.assertIn("Clean review; commits added since it were not reviewed", GATE)
         self.assertIn(
             "descends from a Codex review that reported nothing blocking", GATE
         )
