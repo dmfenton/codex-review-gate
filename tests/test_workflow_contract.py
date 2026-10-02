@@ -514,3 +514,57 @@ class WorkflowContractTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BlobReviewBindingTests(unittest.TestCase):
+    def normalize(self, body, *, login="chatgpt-codex-connector[bot]", reviews=()):
+        start = GATE.index("              def blob_review_ref:")
+        end = GATE.index("\n            ')\" || fail_gate 'Codex review records", start)
+        program = GATE[start:end]
+        issue = {"id": 1, "body": body, "user": {"login": login},
+                 "created_at": "2026-10-01T10:00:00Z"}
+        result = subprocess.run(
+            ["jq", "-cs", "--arg", "review_url", "https://github.com/example/tasks", program],
+            input="\n".join(json.dumps(item) for item in ([[issue]], [list(reviews)], [])),
+            text=True, capture_output=True, check=True,
+        )
+        return json.loads(result.stdout)
+
+    def finding(self, sha="a" * 40, *, repository="example/tasks", host="github.com", anchor="L24-L25"):
+        return (f"https://{host}/{repository}/blob/{sha}/scripts/decision.py#{anchor}\n"
+                "**<sub><sub>![P1 Badge](https://img.shields.io/badge/P1-orange)</sub></sub>  Finding**\n")
+
+    def test_actual_finding_shape_counts_first_round_without_erasing_its_finding(self):
+        body = "\n### 💡 Codex Review\n\n" + self.finding() + "\n---\n\n" + self.finding()
+        final = {"id": 2, "body": "### Codex Review", "commit_id": "b" * 40,
+                 "submitted_at": "2026-10-01T11:00:00Z",
+                 "user": {"login": "chatgpt-codex-connector"}}
+        records = self.normalize(body, reviews=[final])
+        self.assertEqual(["a" * 40, "b" * 40], [item["reviewed_ref"] for item in records])
+        self.assertEqual(body, records[0]["body"])
+        self.assertIn("[P1 Badge]", records[0]["body"])
+
+    def test_owner_or_arbitrary_links_cannot_be_review_proof(self):
+        body = "### 💡 Codex Review\n" + self.finding()
+        self.assertEqual([], self.normalize(body, login="owner"))
+        for unstructured in (self.finding(), "### 💡 Codex Review\n" + self.finding().split("\n")[0],
+                             "> ### 💡 Codex Review\n" + self.finding(),
+                             "Source excerpt:\n```\n### 💡 Codex Review\n" + self.finding()):
+            with self.subTest(body=unstructured):
+                self.assertEqual([], self.normalize(unstructured))
+
+    def test_foreign_ambiguous_or_unpinned_locations_fail_closed(self):
+        invalid = [self.finding(repository="another/tasks"), self.finding(host="evil.test"),
+                   self.finding(sha="a" * 7), self.finding(sha="main"), self.finding(anchor=""),
+                   self.finding() + self.finding(sha="b" * 40),
+                   self.finding() + self.finding(repository="another/tasks"),
+                   self.finding() + self.finding(sha="a" * 7),
+                   self.finding() + self.finding(anchor="")]
+        for locations in invalid:
+            with self.subTest(locations=locations):
+                self.assertEqual([], self.normalize("### 💡 Codex Review\n" + locations))
+
+    def test_explicit_legacy_commit_remains_authoritative(self):
+        body = "### Codex Review\nReviewed commit: `" + "c" * 40 + "`\n"
+        records = self.normalize(body)
+        self.assertEqual("c" * 40, records[0]["reviewed_ref"])

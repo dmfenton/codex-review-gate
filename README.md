@@ -15,6 +15,13 @@ on the live pull-request head and succeeds only when all of these are true:
 - no commit in the current branch's post-base ancestry, and no prior use of the
   source branch itself, identifies a closed unmerged pull request against that base.
 
+Bot-owned findings reports may bind their reviewed commit through structured finding locations:
+standalone blob URLs immediately followed by a severity badge under the Codex Review header.
+Every finding location must use this GitHub host and repository, a full 40-character commit SHA,
+and a line anchor; all locations must identify the same commit. Owner comments, arbitrary links,
+foreign repositories, abbreviated SHAs, floating refs and mixed commits remain untrusted. This
+recognizes a completed review round without discarding its findings or relaxing head/ancestry checks.
+
 Finding-free connector reviews may be represented by the bot's completed summary
 plus a pull-request thumbs-up. The gate accepts that shape only when the summary
 names the reviewed commit and the bot-owned reaction follows that review's start
