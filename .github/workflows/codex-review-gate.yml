@@ -323,7 +323,28 @@ jobs:
 
           # shellcheck disable=SC2016
           codex_reviews="$(printf '%s\n%s\n%s\n' \
-            "$issue_pages" "$review_pages" "$clean_summary_reviews" | jq -cs '
+            "$issue_pages" "$review_pages" "$clean_summary_reviews" | jq -cs \
+            --arg review_url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" '
+              # Only structured finding locations in a bot-owned review report bind a
+              # commit. Reject foreign repositories, short SHAs and mixed commits.
+              def blob_review_ref:
+                if .kind != "issue" or
+                  (.body | split("\n") | map(select(length > 0)) | first) != "### 💡 Codex Review" then ""
+                else
+                  (.body | split("\n")) as $lines
+                  | [range(0; ($lines | length) - 1) as $index
+                      | select($lines[$index + 1] | test(
+                          "^\\*\\*<sub><sub>!\\[P[0-3] Badge\\]"))
+                      | $lines[$index]] as $locations
+                  | [$locations[]
+                      | if startswith($review_url + "/blob/") then
+                          ((try (ltrimstr($review_url + "/blob/") | capture(
+                            "^(?<sha>[0-9a-fA-F]{40})/[^[:space:]]+#L[1-9][0-9]*(-L[1-9][0-9]*)?$"
+                          ).sha | ascii_downcase) catch "") // "")
+                        else "" end] as $refs
+                  | if ($refs | length) > 0 and ($refs | all(. != "")) and
+                       ($refs | unique | length) == 1 then $refs[0] else "" end
+                end;
               .[0] as $issues
               | .[1] as $reviews
               | .[2] as $summaries
@@ -346,9 +367,11 @@ jobs:
               | map(. + {
                   reviewed_ref: (
                     if (.commit_id // "") != "" then .commit_id
-                    else (try (.body | capture(
-                      "Reviewed commit:[^0-9a-fA-F]*(?<sha>[0-9a-fA-F]{7,40})"
-                    ).sha) catch "")
+                    else
+                      ((try (.body | capture(
+                        "Reviewed commit:[^0-9a-fA-F]*(?<sha>[0-9a-fA-F]{7,40})"
+                      ).sha) catch "") // "") as $explicit_ref
+                      | if $explicit_ref != "" then $explicit_ref else blob_review_ref end
                     end
                     | ascii_downcase
                   )
