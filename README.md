@@ -98,4 +98,16 @@ completion are one round. Only completed finding or clean-review outcomes count
 toward the two-round request budget. Extra completed outcomes do not fail the
 gate.
 
+Publish a GitHub release for gate changes intended for consumers, so maintainers
+can identify the reviewed version and its changes. Consumers should configure
+the `github-actions` Dependabot ecosystem with `directory: /` in
+`.github/dependabot.yml` to propose pin updates. Updates still need the consumer's
+checks and review; publishing a release does not update existing SHA pins or
+guarantee that every consumer stays current.
+
+Keep bot comment edit and deletion triggers enabled. Clean reviews complete by
+editing the persistent summary comment, and changed or removed feedback must
+cause the gate to re-audit the live review evidence. Hourly reconciliation can
+fail unresolved blocking threads but never publishes success.
+
 Validate changes with `scripts/validate.sh`.
