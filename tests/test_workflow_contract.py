@@ -19,6 +19,11 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("issue_comment:", CALLER)
         self.assertIn("github.event_name == 'schedule'", CALLER)
 
+    def test_caller_reaudits_mutated_bot_review_evidence(self) -> None:
+        self.assertIn("pull_request_review_comment:\n    types: [created, edited, deleted]", CALLER)
+        self.assertIn("issue_comment:\n    types: [created, edited, deleted]", CALLER)
+        self.assertIn("contains(github.event.changes.body.from, '@codex review')", CALLER)
+
     def test_reusable_gate_serializes_per_pull_request(self) -> None:
         self.assertNotIn("concurrency:", CALLER)
         self.assertIn("discover-base-prs:", GATE)
