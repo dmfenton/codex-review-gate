@@ -41,12 +41,11 @@ status must not authorize a later pull request on the same head.
 The workflow does not post comments or redispatch itself. An hourly self-hosted
 sentinel fails any PR head with a reopened or otherwise unresolved P0/P1 Codex thread;
 it never publishes success. This backstops GitHub Actions' lack of a review-thread
-resolution trigger without generating another Codex review. A base-branch
-push runs one shared discovery job and fans out invalidation jobs inside that
-workflow; it does not create per-PR workflow runs. Each invalidation shares a
-per-PR concurrency group with that PR's audits. A replacing audit revalidates
-the live base, while a delayed invalidation preserves gate results from runs
-created after the base push. Consumers audit on pull-request
+resolution trigger without generating another Codex review. A push to the base
+branch does not touch open pull requests: the audit treats an advanced base as a
+warning, so a status that failed them on every base push could only be cleared by
+re-running an audit that passed unchanged. Consumers do not trigger on base pushes.
+Consumers audit on pull-request
 head/base changes, authenticated Codex review activity, explicit `@codex review`
 comments, and optional manual dispatch. New eligible activity supersedes only
 older work for the same PR; ignored webhook activity never enters the queue.

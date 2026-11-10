@@ -4,8 +4,6 @@ run-name: 'Codex review gate PR #${{ github.event.pull_request.number || github.
 on:
   schedule:
     - cron: '17 * * * *'
-  push:
-    branches: [main]
   pull_request_target:
     types: [opened, reopened, synchronize, ready_for_review, edited, closed]
   pull_request_review:
@@ -31,7 +29,6 @@ permissions:
 jobs:
   enforce:
     if: >-
-      github.event_name == 'push' ||
       github.event_name == 'schedule' ||
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'pull_request_target' &&
