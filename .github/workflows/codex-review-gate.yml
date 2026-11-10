@@ -184,6 +184,15 @@ jobs:
             exit 1
           }
 
+          # A merged head is settled history: the close event and late review comments
+          # still reach this audit, and must leave the result it merged with in place.
+          skip_merged() {
+            printf '### Codex review gate: skipped\n\nPR #%s is merged; its head status is left unchanged.\n' \
+              "$PR_NUMBER" >> "$GITHUB_STEP_SUMMARY"
+            finalized=true
+            exit 0
+          }
+
           finalize_unexpected_failure() {
             local code=$?
             if (( code != 0 )) && [[ "$finalized" != true ]] && [[ "$head_sha" =~ ^[0-9a-f]{40}$ ]]; then
@@ -205,6 +214,7 @@ jobs:
           pr_author="$(jq -r '.user.login // ""' <<<"$pr_data")"
 
           [[ "$head_sha" =~ ^[0-9a-f]{40}$ ]] || fail_gate 'The current pull request head SHA is unavailable.'
+          [[ "$(jq -r '.merged // false' <<<"$pr_data")" != true ]] || skip_merged
           publish_status pending 'Auditing exact-head Codex review'
 
           [[ "$base_sha" =~ ^[0-9a-f]{40}$ ]] || fail_gate 'The current base SHA is unavailable.'

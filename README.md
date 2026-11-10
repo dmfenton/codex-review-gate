@@ -33,6 +33,11 @@ completion for the same commit is the duplicate status artifact for that round.
 Separate completed outcomes remain separate rounds even when they review the
 same commit. Stale, user-authored, running, and unbound signals fail closed.
 
+A merged pull request is settled: the close event and any later review comment
+still reach the audit, which exits without publishing, so the head keeps the status it
+merged with. A pull request closed without merging still fails closed, because its
+status must not authorize a later pull request on the same head.
+
 The workflow does not post comments or redispatch itself. An hourly self-hosted
 sentinel fails any PR head with a reopened or otherwise unresolved P0/P1 Codex thread;
 it never publishes success. This backstops GitHub Actions' lack of a review-thread

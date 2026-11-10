@@ -65,6 +65,27 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("runner_labels_json:", GATE)
         self.assertIn("runs-on: ${{ fromJSON(inputs.runner_labels_json) }}", GATE)
 
+    def test_merged_pull_request_keeps_the_status_it_merged_with(self) -> None:
+        audit = GATE[GATE.index("  audit:") : GATE.index("  reconcile-threads:")]
+        merged_check = audit.index("""[[ "$(jq -r '.merged // false' <<<"$pr_data")" != true ]] || skip_merged""")
+        self.assertLess(merged_check, audit.index("publish_status pending"))
+        self.assertLess(merged_check, audit.index("fail_gate 'Only open pull requests can pass the gate.'"))
+        skip = audit[audit.index("skip_merged() {") : audit.index("finalize_unexpected_failure() {")]
+        self.assertNotIn("publish_status", skip)
+        self.assertIn("exit 0", skip)
+
+    def test_merged_field_decides_the_skip(self) -> None:
+        def merged(pr: dict[str, object]) -> str:
+            return subprocess.run(
+                ["jq", "-r", ".merged // false"],
+                input=json.dumps(pr), capture_output=True, text=True, check=True,
+            ).stdout.strip()
+
+        self.assertEqual(merged({"state": "closed", "merged": True}), "true")
+        self.assertEqual(merged({"state": "closed", "merged": False}), "false")
+        self.assertEqual(merged({"state": "open", "merged": False}), "false")
+        self.assertEqual(merged({"state": "open"}), "false")
+
     def test_gate_requires_exact_head_and_live_threads(self) -> None:
         self.assertIn('if [[ "$reviewed_sha" == "$head_sha" ]]', GATE)
         self.assertIn("reviewThreads(first: 100)", GATE)
