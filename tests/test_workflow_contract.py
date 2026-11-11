@@ -12,7 +12,8 @@ GATE = (ROOT / ".github/workflows/codex-review-gate.yml").read_text()
 class WorkflowContractTests(unittest.TestCase):
     def test_gate_remains_automatic_with_hourly_thread_reconciliation(self) -> None:
         self.assertIn("schedule:\n    - cron: '17 * * * *'", CALLER)
-        self.assertIn("push:\n    branches: [main]", CALLER)
+        self.assertNotIn("push:", CALLER)
+        self.assertNotIn("github.event_name == 'push'", CALLER)
         self.assertIn("pull_request_target:", CALLER)
         self.assertIn("ready_for_review, edited, closed", CALLER)
         self.assertIn("pull_request_review:", CALLER)
@@ -26,17 +27,15 @@ class WorkflowContractTests(unittest.TestCase):
 
     def test_reusable_gate_serializes_per_pull_request(self) -> None:
         self.assertNotIn("concurrency:", CALLER)
-        self.assertIn("discover-base-prs:", GATE)
-        self.assertIn("matrix:\n        pr_number:", GATE)
         self.assertIn("group: codex-review-gate-${{ github.repository }}-pr-", GATE)
         self.assertIn("cancel-in-progress: true", GATE)
 
-    def test_base_push_invalidates_without_redispatch(self) -> None:
-        self.assertIn("invalidate-base:", GATE)
-        self.assertIn("needs: discover-base-prs", GATE)
-        self.assertIn("Base advanced; fresh exact-head review required", GATE)
-        self.assertIn("BASE_RUN_CREATED_AT", GATE)
-        self.assertIn("gate_run_created_at", GATE)
+    def test_base_push_never_fails_open_pull_requests(self) -> None:
+        self.assertNotIn("invalidate-base:", GATE)
+        self.assertNotIn("discover-base-prs:", GATE)
+        self.assertNotIn("Base advanced", GATE)
+        self.assertNotIn("github.event_name", GATE)
+        self.assertIn("The base branch advanced after the latest Codex review", GATE)
 
     def test_gate_has_minimal_write_permission(self) -> None:
         self.assertIn("statuses: write", GATE)
@@ -55,7 +54,6 @@ class WorkflowContractTests(unittest.TestCase):
 
     def test_hourly_reconciliation_only_fails_unresolved_blocking_threads(self) -> None:
         self.assertIn("reconcile-threads:", GATE)
-        self.assertIn("github.event_name != 'push'", GATE)
         self.assertIn("Unresolved blocking Codex review thread remains", GATE)
         self.assertIn('test("\\\\[(P0|P1)( Badge)?\\\\]"; "i")', GATE)
         reconcile = GATE[GATE.index("  reconcile-threads:") :]
