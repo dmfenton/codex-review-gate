@@ -59,6 +59,21 @@ class WorkflowContractTests(unittest.TestCase):
         reconcile = GATE[GATE.index("  reconcile-threads:") :]
         self.assertNotIn("publish_status success", reconcile)
 
+    def test_disposable_runner_cli_bootstrap_preserves_boundaries(self) -> None:
+        for job in GATE.split("    steps:\n")[1:]:
+            setup = job.split("      - name:")[1]
+            self.assertIn("Ensure GitHub CLI on disposable runners", setup)
+            self.assertIn("command -v gh", setup)
+            self.assertIn("Linux-x86_64", setup)
+            self.assertIn("https://github.com/cli/cli/releases/download/v2.103.3/", setup)
+            self.assertIn("4c806978ffce1cec70853302a56d70ac6da4f19bae7adca4e1a8ab00633dd91d", setup)
+            self.assertLess(setup.index("sha256sum --check --status"), setup.index("tar -xzf"))
+            self.assertIn('"$RUNNER_TEMP/review-gate-gh.XXXXXX"', setup)
+            self.assertIn('"$GITHUB_PATH"', setup)
+            self.assertNotIn("sudo", setup)
+            self.assertNotIn("GH_TOKEN", setup)
+        self.assertNotIn("actions/checkout", GATE)
+
     def test_gate_runs_on_configurable_runner_pool(self) -> None:
         self.assertIn("runner_labels_json:", GATE)
         self.assertIn("runs-on: ${{ fromJSON(inputs.runner_labels_json) }}", GATE)

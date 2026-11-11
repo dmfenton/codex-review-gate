@@ -32,6 +32,27 @@ jobs:
       cancel-in-progress: true
     runs-on: ${{ fromJSON(inputs.runner_labels_json) }}
     steps:
+      - name: Ensure GitHub CLI on disposable runners
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v gh >/dev/null 2>&1; then
+            exit 0
+          fi
+          if [[ "$(uname -s)-$(uname -m)" != Linux-x86_64 ]]; then
+            echo "::error::Install GitHub CLI on this runner architecture before using the gate"
+            exit 1
+          fi
+          cli_dir="$(mktemp -d "$RUNNER_TEMP/review-gate-gh.XXXXXX")"
+          archive="$cli_dir/gh.tar.gz"
+          curl --fail --silent --show-error --location --retry 3 \
+            https://github.com/cli/cli/releases/download/v2.103.3/gh_2.103.3_linux_amd64.tar.gz \
+            --output "$archive"
+          printf '%s  %s\n' \
+            4c806978ffce1cec70853302a56d70ac6da4f19bae7adca4e1a8ab00633dd91d \
+            "$archive" | sha256sum --check --status
+          tar -xzf "$archive" -C "$cli_dir"
+          echo "$cli_dir/gh_2.103.3_linux_amd64/bin" >> "$GITHUB_PATH"
       - name: Audit exact-head Codex review
         env:
           BASE_BRANCH: ${{ inputs.base_branch }}
@@ -442,6 +463,27 @@ jobs:
       cancel-in-progress: true
     runs-on: ${{ fromJSON(inputs.runner_labels_json) }}
     steps:
+      - name: Ensure GitHub CLI on disposable runners
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v gh >/dev/null 2>&1; then
+            exit 0
+          fi
+          if [[ "$(uname -s)-$(uname -m)" != Linux-x86_64 ]]; then
+            echo "::error::Install GitHub CLI on this runner architecture before using the gate"
+            exit 1
+          fi
+          cli_dir="$(mktemp -d "$RUNNER_TEMP/review-gate-gh.XXXXXX")"
+          archive="$cli_dir/gh.tar.gz"
+          curl --fail --silent --show-error --location --retry 3 \
+            https://github.com/cli/cli/releases/download/v2.103.3/gh_2.103.3_linux_amd64.tar.gz \
+            --output "$archive"
+          printf '%s  %s\n' \
+            4c806978ffce1cec70853302a56d70ac6da4f19bae7adca4e1a8ab00633dd91d \
+            "$archive" | sha256sum --check --status
+          tar -xzf "$archive" -C "$cli_dir"
+          echo "$cli_dir/gh_2.103.3_linux_amd64/bin" >> "$GITHUB_PATH"
       - name: Fail heads with unresolved blocking Codex threads
         env:
           BASE_BRANCH: ${{ inputs.base_branch }}

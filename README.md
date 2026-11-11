@@ -89,7 +89,7 @@ jobs:
     uses: dmfenton/codex-review-gate/.github/workflows/codex-review-gate.yml@<commit-sha>
     with:
       pr_number: ${{ github.event.pull_request.number || github.event.issue.number || inputs.pr_number }}
-      runner_labels_json: '["self-hosted","lilserver"]'
+      runner_labels_json: '["self-hosted","pr-isolated","<repository>-pr"]'
 ```
 
 Every consumer must pin a full commit SHA. Do not reference a mutable branch or
@@ -115,3 +115,14 @@ cause the gate to re-audit the live review evidence. Hourly reconciliation can
 fail unresolved blocking threads but never publishes success.
 
 Validate changes with `scripts/validate.sh`.
+
+### Disposable self-hosted runners
+
+Use the repository's existing one-job isolated pool, never a persistent release
+worker, for privileged review events. The gate does not check out pull-request
+code. Pools need Bash, curl, jq, tar and sha256sum. If GitHub CLI is absent, the
+workflow downloads the official Linux x86_64 CLI to job-temporary storage and
+verifies its pinned SHA-256 before extraction; it does not use sudo or change the
+host. Existing CLI installations are preserved. Other architectures must already
+provide GitHub CLI. The container and its temporary CLI are destroyed after the
+job. Consumers must retain their existing status permissions and immutable pin.
