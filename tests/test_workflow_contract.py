@@ -47,6 +47,17 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertNotIn("pull-requests: write", GATE)
         self.assertNotIn("actions: write", GATE)
 
+    def test_dependabot_runs_get_no_write_token_but_its_pull_requests_are_audited(self) -> None:
+        audit = GATE[GATE.index("  audit:") : GATE.index("    concurrency:")]
+        reconcile = GATE[GATE.index("  reconcile-threads:") :]
+        reconcile_guard = reconcile[: reconcile.index("    concurrency:")]
+        for guard in (audit, reconcile_guard):
+            self.assertIn("github.actor != 'dependabot[bot]'", guard)
+            self.assertIn("github.triggering_actor != 'dependabot[bot]'", guard)
+        self.assertNotIn("separate read-only policy", GATE)
+        self.assertNotIn("pr_author", GATE)
+        self.assertNotIn("'dependabot[bot]' ]] || continue", reconcile)
+
     def test_gate_never_comments_or_redispatches(self) -> None:
         self.assertNotIn('/comments" -f body', GATE)
         self.assertNotIn("gh workflow run", GATE)

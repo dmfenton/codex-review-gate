@@ -26,7 +26,13 @@ permissions:
 
 jobs:
   audit:
-    if: inputs.pr_number != '0'
+    # Dependabot-triggered runs get no job, so they never receive this job's statuses: write
+    # token. A Dependabot head stays without a passing status until an owner-requested Codex
+    # review completes; the owner and Codex events then audit it like any other pull request.
+    if: >-
+      inputs.pr_number != '0' &&
+      github.actor != 'dependabot[bot]' &&
+      github.triggering_actor != 'dependabot[bot]'
     concurrency:
       group: codex-review-gate-${{ github.repository }}-pr-${{ inputs.pr_number }}
       cancel-in-progress: true
@@ -104,7 +110,6 @@ jobs:
           head_ref="$(jq -r '.head.ref // ""' <<<"$pr_data")"
           pr_state="$(jq -r '.state // ""' <<<"$pr_data")"
           pr_base="$(jq -r '.base.ref // ""' <<<"$pr_data")"
-          pr_author="$(jq -r '.user.login // ""' <<<"$pr_data")"
 
           [[ "$head_sha" =~ ^[0-9a-f]{40}$ ]] || fail_gate 'The current pull request head SHA is unavailable.'
           [[ "$(jq -r '.merged // false' <<<"$pr_data")" != true ]] || skip_merged
@@ -115,7 +120,6 @@ jobs:
           [[ "$pr_base" == "$BASE_BRANCH" ]] || fail_gate "Pull request must target $BASE_BRANCH."
           [[ "$head_repository" == "$GITHUB_REPOSITORY" ]] || fail_gate 'Fork pull requests cannot use this privileged status gate.'
           [[ -n "$head_ref" ]] || fail_gate 'The current pull request head branch is unavailable.'
-          [[ "$pr_author" != 'dependabot[bot]' ]] || fail_gate 'Dependabot pull requests require a separate read-only policy.'
 
           owner="${GITHUB_REPOSITORY%%/*}"
           repository="${GITHUB_REPOSITORY#*/}"
@@ -436,7 +440,10 @@ jobs:
             "$review_outcome" "$blocking_findings" >> "$GITHUB_STEP_SUMMARY"
 
   reconcile-threads:
-    if: inputs.pr_number == '0'
+    if: >-
+      inputs.pr_number == '0' &&
+      github.actor != 'dependabot[bot]' &&
+      github.triggering_actor != 'dependabot[bot]'
     concurrency:
       group: codex-review-gate-${{ github.repository }}-thread-reconcile
       cancel-in-progress: true
@@ -477,10 +484,9 @@ jobs:
           failed=0
           invalidated=0
 
-          while IFS=$'\t' read -r pr_number head_sha head_repository author; do
+          while IFS=$'\t' read -r pr_number head_sha head_repository; do
             [[ -n "$pr_number" ]] || continue
             [[ "$head_repository" == "$GITHUB_REPOSITORY" ]] || continue
-            [[ "$author" != 'dependabot[bot]' ]] || continue
             [[ "$head_sha" =~ ^[0-9a-f]{40}$ ]] || continue
 
             thread_data="$(retry_api gh api graphql \
@@ -529,7 +535,7 @@ jobs:
             fi
           done < <(jq -r '
             add[]
-            | [.number, .head.sha, (.head.repo.full_name // ""), (.user.login // "")]
+            | [.number, .head.sha, (.head.repo.full_name // "")]
             | @tsv
           ' <<<"$pulls")
 
