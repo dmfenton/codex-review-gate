@@ -73,6 +73,21 @@ budget must never become a permanent merge blocker. The base branch advancing
 after the latest review is a warning, not a block. Adding commits on top of a closed unmerged pull-request
 head, or rewriting that source branch, cannot reset the budget.
 
+## Dependabot pull requests
+
+Dependabot pull requests go through the same review gate, with one difference in who runs it.
+A run that Dependabot triggers (its open, push and close events) gets no job, so it never
+receives the gate's `statuses: write` token; GitHub already limits such runs to Dependabot
+secrets. A Dependabot head therefore has no passing status until someone requests a Codex review
+with `scripts/request-review.py`. The owner's request, Codex's review events, manual dispatch and
+the hourly reconciliation run under their own actors and audit the pull request exactly like any
+other. The gate never checks out or runs pull-request code, so auditing a Dependabot pull
+request reads only review metadata.
+
+A Dependabot force-push (a rebase, or a group update) replaces the reviewed commit, so the new
+head is not a descendant of it and the gate stays failed. Request a review for it if the budget
+allows; otherwise ask the owner.
+
 ## Requesting a review
 
 Codex does not review draft pull requests, and marking a PR ready has not reliably started a
