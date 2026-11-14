@@ -58,6 +58,14 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertNotIn("pr_author", GATE)
         self.assertNotIn("'dependabot[bot]' ]] || continue", reconcile)
 
+    def test_replacement_audit_starts_at_the_branch_merge_base(self) -> None:
+        audit = GATE[GATE.index("  audit:") : GATE.index("  reconcile-threads:")]
+        self.assertIn("compare/$base_sha...$head_sha", audit)
+        self.assertIn(".merge_base_commit.sha", audit)
+        replacement = audit[audit.index("replacement_truncated=") : audit.index("closed_pr_pages=")]
+        self.assertIn("$fork_point", replacement)
+        self.assertNotIn("$base_sha", replacement)
+
     def test_gate_never_comments_or_redispatches(self) -> None:
         self.assertNotIn('/comments" -f body', GATE)
         self.assertNotIn("gh workflow run", GATE)
@@ -381,7 +389,7 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("history(first: 100)", GATE)
         self.assertIn("associatedPullRequests(first: 100)", GATE)
         self.assertIn(".state == \"CLOSED\" and .mergedAt == null", GATE)
-        self.assertIn("($history | map(.oid == $base_sha) | index(true))", GATE)
+        self.assertIn("($history | map(.oid == $fork_point) | index(true))", GATE)
         self.assertIn("pulls?state=closed&base=$BASE_BRANCH&per_page=100", GATE)
         self.assertIn('select((.head.ref // "") == $head_ref)', GATE)
         self.assertIn("Review-budget reset detected", GATE)

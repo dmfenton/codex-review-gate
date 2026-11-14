@@ -12,7 +12,7 @@ on the live pull-request head and succeeds only when all of these are true:
 - the review happened after the current base commit;
 - the pull request head and base stay unchanged during the audit; and
 - live GraphQL `reviewThreads` contains no unresolved P0/P1 Codex thread; and
-- no commit in the current branch's post-base ancestry, and no prior use of the
+- no commit in the current branch's ancestry after its merge base with the base branch, and no prior use of the
   source branch itself, identifies a closed unmerged pull request against that base.
 
 Bot-owned findings reports may bind their reviewed commit through structured finding locations:

@@ -121,6 +121,13 @@ jobs:
           [[ "$head_repository" == "$GITHUB_REPOSITORY" ]] || fail_gate 'Fork pull requests cannot use this privileged status gate.'
           [[ -n "$head_ref" ]] || fail_gate 'The current pull request head branch is unavailable.'
 
+          # The branch's own commits are those after its merge base with the base branch.
+          # Comparing against the base tip instead failed every branch that had fallen behind
+          # by more than the history page, which is the normal state of a Dependabot branch.
+          fork_point="$(retry_api gh api "repos/$GITHUB_REPOSITORY/compare/$base_sha...$head_sha" \
+            --jq '.merge_base_commit.sha // ""')" || fail_gate 'The branch merge base could not be read.'
+          [[ "$fork_point" =~ ^[0-9a-f]{40}$ ]] || fail_gate 'The branch merge base is unavailable.'
+
           owner="${GITHUB_REPOSITORY%%/*}"
           repository="${GITHUB_REPOSITORY#*/}"
           replacement_data="$(retry_api gh api graphql \
@@ -143,17 +150,17 @@ jobs:
                 }
               }
             }")" || fail_gate 'Pull requests associated with the current branch history could not be read.'
-          replacement_truncated="$(jq --arg base_sha "$base_sha" '
-            (.data.repository.object.history.nodes | map(.oid == $base_sha) | any) as $base_found
+          replacement_truncated="$(jq --arg fork_point "$fork_point" '
+            (.data.repository.object.history.nodes | map(.oid == $fork_point) | any) as $base_found
             | (.data.repository.object.history.pageInfo.hasNextPage and ($base_found | not)) or
               ([.data.repository.object.history.nodes[].associatedPullRequests.pageInfo.hasNextPage] | any)
           ' <<<"$replacement_data")" || fail_gate 'Replacement pull-request pagination could not be audited.'
           [[ "$replacement_truncated" == false ]] || \
             fail_gate 'Replacement pull-request history exceeded the fail-closed audit limit.'
-          replaced_prs="$(jq --argjson current_pr "$PR_NUMBER" --arg base_sha "$base_sha" \
+          replaced_prs="$(jq --argjson current_pr "$PR_NUMBER" --arg fork_point "$fork_point" \
             --arg base "$BASE_BRANCH" '
               .data.repository.object.history.nodes as $history
-              | ($history | map(.oid == $base_sha) | index(true)) as $base_index
+              | ($history | map(.oid == $fork_point) | index(true)) as $base_index
               | [
                   $history[:($base_index // ($history | length))][]
                   | .oid as $commit_oid
