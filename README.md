@@ -73,6 +73,26 @@ budget must never become a permanent merge blocker. The base branch advancing
 after the latest review is a warning, not a block. Adding commits on top of a closed unmerged pull-request
 head, or rewriting that source branch, cannot reset the budget.
 
+## Requesting a review
+
+Codex does not review draft pull requests, and marking a PR ready has not reliably started a
+review in these repositories, so every review is requested explicitly as soon as the PR is ready.
+`scripts/request-review.py` is the one supported way to do that:
+
+```sh
+python3 scripts/request-review.py <PR>            # report whether a request is allowed
+python3 scripts/request-review.py <PR> --request  # post `@codex review` when it is
+```
+
+It follows the counting above: only completed Codex outcomes spend the two-round budget, so a
+request Codex failed to complete can be repeated. It refuses a draft, a non-`main` base, a head
+that already has a review, a review that is running or pending, and a third round. Consumers keep
+an identical copy at `scripts/request-review.py` and call it from their PR skill. Change it here
+first, then copy it unchanged.
+
+The published failure description is always "Exact-head Codex review is not ready", whatever the
+cause. Read the linked run log for the specific reason.
+
 Consumers keep a small event wrapper and pin the reusable workflow to a full
 commit SHA:
 

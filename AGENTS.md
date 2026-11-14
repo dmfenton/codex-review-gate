@@ -1,6 +1,6 @@
 # Repository Instructions
 
-- Finish implementation and required checks before requesting `@codex review`.
+- Finish implementation and required checks, mark the PR ready, then request the review immediately with `python3 scripts/request-review.py <PR> --request`. Never post `@codex review` by hand.
 - Codex is advisory except for explicit P0/P1 findings. A valid P2/P3 finding is not a release blocker by default.
 - Use at most two Codex review rounds per pull request. Address all blocking findings from a round together before requesting the second and final review. Request that second review when a round reported blocking findings; a round that reported none is already the final one.
 - After the second review, fix any blocking findings, rerun required checks, resolve only those blocking threads, and manually dispatch the gate; then merge. Never request a third review. A later head merges as long as it descends from the final reviewed commit and no blocking thread remains, whether it fixes blockers, takes advisory findings, or merges the base branch.
