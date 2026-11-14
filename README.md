@@ -85,8 +85,10 @@ python3 scripts/request-review.py <PR> --request  # post `@codex review` when it
 ```
 
 It follows the counting above: only completed Codex outcomes spend the two-round budget, so a
-request Codex failed to complete can be repeated. It refuses a draft, a non-`main` base, a head
-that already has a review, a review that is running or pending, and a third round. Consumers keep
+request Codex failed to complete can be repeated. It recognizes every completed shape listed
+above: review records, clean-review receipts, bound findings reports, and clean summaries. It
+refuses a draft, a non-`main` base, a head that already has a review, a review that is running or
+pending, a round after one that reported no P0/P1 finding (that round was final), and a third round. Consumers keep
 an identical copy at `scripts/request-review.py` and call it from their PR skill. Change it here
 first, then copy it unchanged.
 
