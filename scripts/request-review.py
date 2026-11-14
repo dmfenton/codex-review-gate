@@ -30,6 +30,7 @@ STATE = re.compile(r"<!-- codex-review-state:v1 (\{.*?\}) -->")
 SUMMARY = "<!-- codex-pull-request-review-summary -->"
 REPORT = "### \U0001f4a1 Codex Review"
 BLOB = re.compile(r"/blob/([0-9a-f]{40})/[^\s#]+#L\d+")
+ORIGIN = re.compile(r"[:/]([^/:]+/[^/]+?)(?:\.git)?/?$")
 BLOCKING = re.compile(r"\[(P0|P1)( Badge)?\]", re.IGNORECASE)
 ACTIVE = {"running", "queued", "pending", "in_progress"}
 RETRYABLE = {"failed", "error", "errored", "cancelled", "canceled", "timed_out"}
@@ -180,6 +181,15 @@ def gh(*args: str) -> Any:
     return json.loads(subprocess.check_output(["gh", *args], text=True))
 
 
+def origin_repo() -> str:
+    """owner/name from origin; `gh repo view` needs GraphQL, which cloud sessions lack."""
+    url = subprocess.check_output(["git", "remote", "get-url", "origin"], text=True).strip()
+    match = ORIGIN.search(url)
+    if not match:
+        raise SystemExit("Cannot read owner/name from the origin remote; pass --repo.")
+    return match[1]
+
+
 def pages(resource: str) -> list[Json]:
     return [item for page in gh("api", "--paginate", "--slurp", resource) for item in page]
 
@@ -193,7 +203,7 @@ def main() -> int:
     parser.add_argument("--repo", help="owner/name; defaults to the current checkout's repository")
     parser.add_argument("--base", default="main", help="required base branch (default main)")
     args = parser.parse_args()
-    repo = args.repo or gh("repo", "view", "--json", "nameWithOwner")["nameWithOwner"]
+    repo = args.repo or origin_repo()
     pr = gh("api", f"repos/{repo}/pulls/{args.pr}")
     if pr["state"] != "open" or pr["base"]["ref"] != args.base:
         print(f"Review requests require an open PR targeting {args.base}.")

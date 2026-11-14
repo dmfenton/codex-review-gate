@@ -100,6 +100,15 @@ class RequestReviewTests(unittest.TestCase):
         comments = [request(), summary("completed", OLD, findings="true")]
         self.check(True, [review(OLD)], comments, [finding(P1)])
 
+    def test_origin_pattern_reads_owner_and_name(self):
+        for url in (
+            "https://github.com/o/r",
+            "https://github.com/o/r.git",
+            "git@github.com:o/r.git",
+            "http://proxy@127.0.0.1:8080/git/o/r",
+        ):
+            self.assertEqual(module.ORIGIN.search(url)[1], "o/r", url)
+
     def test_untrusted_request_is_ignored(self):
         self.check(True, comments=[{**request(), "author_association": "NONE"}])
 
