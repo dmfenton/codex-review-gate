@@ -9,6 +9,8 @@ the PR is open, ready (not a draft), targets the base branch, and the rules belo
 Counting follows the gate's README: only completed Codex outcomes consume the budget. A trigger
 comment that Codex never completed does not, so a failed attempt can be requested again. A round
 that reported no P0/P1 finding is final, as in the gate, so no further round is requested.
+A request stops counting as pending once Codex answers it without a review (for example a setup
+error) or once it has gone unanswered for PENDING_TIMEOUT, so a lost request never blocks forever.
 """
 
 from __future__ import annotations
@@ -18,6 +20,7 @@ import json
 import re
 import subprocess
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 Json = dict[str, Any]
@@ -33,6 +36,9 @@ BLOB = re.compile(r"/blob/([0-9a-f]{40})/[^\s#]+#L\d+")
 ORIGIN = re.compile(r"[:/]([^/:]+/[^/]+?)(?:\.git)?/?$")
 BLOCKING = re.compile(r"\[(P0|P1)( Badge)?\]", re.IGNORECASE)
 ACTIVE = {"running", "queued", "pending", "in_progress"}
+# limit: Codex acknowledges a request within seconds and finishes a review in about two minutes
+# (observed on chef#404-#410, 2026-11-14/15); an hour without any answer means it was lost.
+PENDING_TIMEOUT = timedelta(hours=1)
 RETRYABLE = {"failed", "error", "errored", "cancelled", "canceled", "timed_out"}
 
 
@@ -152,26 +158,41 @@ def _trusted_request(comment: Json, after: str) -> bool:
     )
 
 
-def _activity_block(rounds: list[Outcome], comments: list[Json]) -> str | None:
+def _parse(stamp: str) -> datetime:
+    return datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+
+
+def _unanswered(request: Json, comments: list[Json], now: datetime) -> bool:
+    """Still waiting: no Codex comment since the request, and not yet timed out."""
+    answered = any(_bot(c) and c["created_at"] > request["created_at"] for c in comments)
+    return not answered and now - _parse(request["created_at"]) < PENDING_TIMEOUT
+
+
+def _activity_block(rounds: list[Outcome], comments: list[Json], now: datetime) -> str | None:
     status, status_at = summary_status(comments)
     if status in ACTIVE:
         return "A Codex review is already running. Wait for it."
     last_done = max((r.at for r in rounds), default="")
     requests = [c for c in comments if _trusted_request(c, last_done)]
     retry = bool(requests) and status in RETRYABLE and status_at > requests[-1]["created_at"]
-    if requests and not retry:
+    if requests and not retry and _unanswered(requests[-1], comments, now):
         return (
-            "A review request is already pending. Wait for Codex; if it never acknowledged "
-            "the request (no eyes reaction, summary unchanged), ask the owner."
+            "A review request is already pending. Wait for Codex; it is treated as lost and can "
+            "be requested again if Codex has not answered within an hour."
         )
     return None
 
 
 def decision(
-    head: str, reviews: list[Json], comments: list[Json], review_comments: list[Json]
+    head: str,
+    reviews: list[Json],
+    comments: list[Json],
+    review_comments: list[Json],
+    now: datetime | None = None,
 ) -> tuple[bool, str]:
     rounds = completed_rounds(reviews, comments, review_comments)
-    block = _round_block(head, rounds) or _activity_block(rounds, comments)
+    current = now or datetime.now(UTC)
+    block = _round_block(head, rounds) or _activity_block(rounds, comments, current)
     if block:
         return False, block
     return True, f"Ready for review round {len(rounds) + 1}/{ROUND_BUDGET}."
