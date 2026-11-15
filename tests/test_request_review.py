@@ -1,6 +1,7 @@
 import importlib.util
 import sys
 import unittest
+from datetime import datetime
 from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts/request-review.py"
@@ -15,6 +16,8 @@ P1 = (
     "**<sub><sub>![P1 Badge](https://img.shields.io/badge/P1-orange?style=flat)</sub></sub>  Fix it"
 )
 P2 = "**<sub><sub>![P2 Badge](https://img.shields.io/badge/P2-yellow?style=flat)</sub></sub>  Nit"
+SOON = datetime.fromisoformat("2026-01-01T09:10:00+00:00")
+LATER = datetime.fromisoformat("2026-01-01T10:30:00+00:00")
 HEAD = "b" * 40
 OLD = "a" * 40
 MID = "c" * 40
@@ -56,9 +59,9 @@ def summary(status, commit=OLD, at="2026-01-01T10:00:00Z", findings="null"):
 
 
 class RequestReviewTests(unittest.TestCase):
-    def check(self, expected, reviews=(), comments=(), review_comments=(), head=HEAD):
+    def check(self, expected, reviews=(), comments=(), review_comments=(), head=HEAD, now=SOON):
         allowed, message = module.decision(
-            head, list(reviews), list(comments), list(review_comments)
+            head, list(reviews), list(comments), list(review_comments), now
         )
         self.assertEqual(allowed, expected, message)
 
@@ -92,6 +95,18 @@ class RequestReviewTests(unittest.TestCase):
 
     def test_unanswered_request_is_pending(self):
         self.check(False, comments=[request()])
+
+    def test_lost_request_can_be_retried_after_timeout(self):
+        self.check(True, comments=[request()], now=LATER)
+
+    def test_request_answered_without_review_can_be_retried(self):
+        setup = {
+            "user": BOT,
+            "body": "To use Codex here, create an environment for this repo.",
+            "created_at": "2026-01-01T09:00:07Z",
+            "author_association": "NONE",
+        }
+        self.check(True, comments=[request(), setup])
 
     def test_failed_attempt_does_not_spend_budget(self):
         self.check(True, comments=[request(), summary("failed", HEAD, "2026-01-01T09:05:00Z")])
