@@ -85,7 +85,7 @@ class WorkflowContractTests(unittest.TestCase):
     def test_merged_pull_request_keeps_the_status_it_merged_with(self) -> None:
         audit = GATE[GATE.index("  audit:") : GATE.index("  reconcile-threads:")]
         merged_check = audit.index("""[[ "$(jq -r '.merged // false' <<<"$pr_data")" != true ]] || skip_merged""")
-        self.assertLess(merged_check, audit.index("publish_status pending"))
+        self.assertLess(merged_check, audit.index("publish_status pending 'Auditing"))
         self.assertLess(merged_check, audit.index("fail_gate 'Only open pull requests can pass the gate.'"))
         skip = audit[audit.index("skip_merged() {") : audit.index("finalize_unexpected_failure() {")]
         self.assertNotIn("publish_status", skip)
@@ -548,11 +548,31 @@ class WorkflowContractTests(unittest.TestCase):
 
         self.assertEqual("1", result.stdout.strip())
 
+    def test_waiting_for_a_review_is_pending_not_failure(self) -> None:
+        # A review that can still arrive shows as in progress: the status is pending
+        # (never success, so merge stays blocked) and the job passes instead of going red.
+        wait = GATE[GATE.index("wait_gate() {") : GATE.index("skip_merged() {")]
+        self.assertIn('publish_status pending "$description"', wait)
+        self.assertIn("exit 0", wait)
+        self.assertNotIn("success", wait)
+        self.assertIn("[[ -n \"$latest_review\" ]] || wait_gate", GATE)
+        self.assertNotIn("fail_gate 'No completed Codex review exists", GATE)
+        self.assertIn("'Waiting for the final Codex review round'", GATE)
+
+    def test_awaiting_final_round_still_fails_unresolved_blocking_threads(self) -> None:
+        # Pending is only for waiting. A live unresolved P0/P1 thread is a real finding and
+        # fails first, as the hourly reconciliation does, so the two never disagree.
+        thread_fail = GATE.index('fail_gate "$unresolved_blocking unresolved blocking')
+        final_wait = GATE.index("'Waiting for the final Codex review round'")
+        self.assertLess(thread_fail, final_wait)
+        self.assertLess(final_wait, GATE.index("publish_status success 'Exact-head Codex review is clean'"))
+
     def test_gate_publishes_stable_commit_status(self) -> None:
         self.assertIn("statuses/$head_sha", GATE)
         self.assertIn("context='Codex review gate'", GATE)
         self.assertIn("publish_status success", GATE)
         self.assertIn("publish_status failure", GATE)
+        self.assertIn("publish_status pending", GATE)
 
 
 if __name__ == "__main__":
