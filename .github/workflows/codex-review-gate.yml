@@ -83,6 +83,20 @@ jobs:
             exit 1
           }
 
+          # Waiting on a review that can still arrive is not a failure: publish pending so
+          # the head reads as in progress. Pending is not success, so it still blocks merge;
+          # the job itself passes so the Actions run is not red either. The Codex review
+          # event that completes the round re-runs this audit and replaces the status.
+          wait_gate() {
+            local message="$1"
+            local description="$2"
+            echo "::notice::$message"
+            printf '### Codex review gate: waiting\n\n%s\n' "$message" >> "$GITHUB_STEP_SUMMARY"
+            publish_status pending "$description"
+            finalized=true
+            exit 0
+          }
+
           # A merged head is settled history: the close event and late review comments
           # still reach this audit, and must leave the result it merged with in place.
           skip_merged() {
@@ -309,7 +323,9 @@ jobs:
             ')" || fail_gate 'Codex review records could not be normalized.'
 
           latest_review="$(jq -c 'last // empty' <<<"$codex_reviews")"
-          [[ -n "$latest_review" ]] || fail_gate 'No completed Codex review exists for this pull request.'
+          [[ -n "$latest_review" ]] || wait_gate \
+            'No completed Codex review exists for this pull request yet.' \
+            'Waiting for a Codex review of this head'
           review_rounds="$(jq 'length' <<<"$codex_reviews")"
           if (( review_rounds > MAX_REVIEW_ROUNDS )); then
             echo "::warning::Codex review budget exceeded: $review_rounds/$MAX_REVIEW_ROUNDS rounds. Evaluating the latest completed review without requiring another round."
@@ -359,20 +375,23 @@ jobs:
             # the reviewed commit and no blocking thread remains: a blocking fix, an advisory fix,
             # or a merge of the base are all expected after it and never reopen review.
             if (( review_rounds < MAX_REVIEW_ROUNDS && blocking_findings > 0 )); then
-              fail_gate "The latest Codex review reported $blocking_findings blocking finding(s) and does not cover current head $head_sha. One final review round remains."
-            fi
-            compare_status="$(retry_api gh api \
-              "repos/$GITHUB_REPOSITORY/compare/$reviewed_sha...$head_sha" --jq .status 2>/dev/null || true)"
-            [[ "$compare_status" == ahead ]] || \
-              fail_gate 'The current head is not a descendant of the final reviewed commit.'
-            if (( blocking_findings > 0 )); then
-              review_outcome='final-round findings remediated'
-            elif (( review_rounds < MAX_REVIEW_ROUNDS )); then
-              # Say it out loud: these commits carry no review of their own.
-              echo "::warning::Head $head_sha descends from a Codex review that reported nothing blocking; the commits added since it were not reviewed."
-              review_outcome='clean-review descendant accepted'
+              # Still audit the live threads below: an unresolved blocking thread is a real
+              # finding and fails, matching the hourly reconciliation. Otherwise wait.
+              review_outcome='awaiting final round'
             else
-              review_outcome='final-round descendant accepted'
+              compare_status="$(retry_api gh api \
+                "repos/$GITHUB_REPOSITORY/compare/$reviewed_sha...$head_sha" --jq .status 2>/dev/null || true)"
+              [[ "$compare_status" == ahead ]] || \
+                fail_gate 'The current head is not a descendant of the final reviewed commit.'
+              if (( blocking_findings > 0 )); then
+                review_outcome='final-round findings remediated'
+              elif (( review_rounds < MAX_REVIEW_ROUNDS )); then
+                # Say it out loud: these commits carry no review of their own.
+                echo "::warning::Head $head_sha descends from a Codex review that reported nothing blocking; the commits added since it were not reviewed."
+                review_outcome='clean-review descendant accepted'
+              else
+                review_outcome='final-round descendant accepted'
+              fi
             fi
           fi
 
@@ -429,6 +448,11 @@ jobs:
           ' <<<"$thread_data")"
           (( unresolved_blocking == 0 )) || \
             fail_gate "$unresolved_blocking unresolved blocking Codex review thread(s) remain."
+
+          if [[ "$review_outcome" == 'awaiting final round' ]]; then
+            wait_gate "The latest Codex review reported $blocking_findings blocking finding(s) and does not cover current head $head_sha. One final review round remains." \
+              'Waiting for the final Codex review round'
+          fi
 
           if [[ "$review_outcome" == 'exact-head clean review' ]]; then
             publish_status success 'Exact-head Codex review is clean'

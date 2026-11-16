@@ -107,7 +107,15 @@ pending, a round after one that reported no P0/P1 finding (that round was final)
 an identical copy at `scripts/request-review.py` and call it from their PR skill. Change it here
 first, then copy it unchanged.
 
-The published failure description is always "Exact-head Codex review is not ready", whatever the
+While a review can still arrive, the gate waits instead of failing: it publishes `pending` and
+the job passes, so the pull request shows the review as in progress rather than red. That covers a
+head with no completed Codex review yet ("Waiting for a Codex review of this head") and a head
+that moved after a round with blocking findings while the final round is still owed ("Waiting for
+the final Codex review round"; an unresolved P0/P1 thread still fails it). Pending is not success,
+so it blocks merge exactly as failure does. The Codex review event re-runs the audit and replaces
+the status.
+
+Every real failure publishes the description "Exact-head Codex review is not ready", whatever the
 cause. Read the linked run log for the specific reason.
 
 Consumers keep a small event wrapper and pin the reusable workflow to a full
