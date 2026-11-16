@@ -160,3 +160,4 @@ cause the gate to re-audit the live review evidence. Hourly reconciliation can
 fail unresolved blocking threads but never publishes success.
 
 Validate changes with `scripts/validate.sh`.
+
