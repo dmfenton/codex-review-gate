@@ -128,5 +128,18 @@ class RequestReviewTests(unittest.TestCase):
         self.check(True, comments=[{**request(), "author_association": "NONE"}])
 
 
+class RequesterTests(unittest.TestCase):
+    def test_person_may_request(self):
+        self.assertIsNone(module.requester_problem({"login": "dmfenton", "type": "User"}))
+
+    def test_bot_is_refused_with_the_fix(self):
+        problem = module.requester_problem({"login": "fenton-lilserver[bot]", "type": "Bot"})
+        self.assertIn("fenton-lilserver[bot]", problem)
+        self.assertIn("signed in as the repository owner", problem)
+
+    def test_unreadable_user_is_refused(self):
+        self.assertIn("App or bot token", module.requester_problem(None))
+
+
 if __name__ == "__main__":
     unittest.main()

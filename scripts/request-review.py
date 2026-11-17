@@ -215,6 +215,32 @@ def pages(resource: str) -> list[Json]:
     return [item for page in gh("api", "--paginate", "--slurp", resource) for item in page]
 
 
+def requester_problem(user: Json | None) -> str | None:
+    """Codex answers a request only from a person with a Codex account. A GitHub App
+    or bot token (a runner host's, say) gets "create a Codex account" instead, so the
+    request is refused here, before it posts, with the fix named."""
+    if user is None:
+        return (
+            "gh is not signed in as a person (an App or bot token cannot read /user); "
+            "Codex ignores requests from bots. Request from a checkout where `gh` is "
+            "signed in as the repository owner."
+        )
+    login = str(user.get("login", ""))
+    if user.get("type") == "Bot" or login.endswith("[bot]"):
+        return (
+            f"gh is signed in as the bot {login}; Codex ignores requests from bots. "
+            "Request from a checkout where `gh` is signed in as the repository owner."
+        )
+    return None
+
+
+def signed_in_user() -> Json | None:
+    try:
+        return gh("api", "user")
+    except subprocess.CalledProcessError:
+        return None
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -246,6 +272,10 @@ def main() -> int:
     if not allowed:
         return 1
     if args.request:
+        problem = requester_problem(signed_in_user())
+        if problem:
+            print(problem)
+            return 1
         endpoint = f"repos/{repo}/issues/{args.pr}/comments"
         post = ["gh", "api", "--method", "POST", endpoint, "-f", "body=@codex review", "--silent"]
         subprocess.run(post, check=True)
