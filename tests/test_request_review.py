@@ -1,6 +1,8 @@
 import importlib.util
 import sys
+import subprocess
 import unittest
+from unittest import mock
 from datetime import datetime
 from pathlib import Path
 
@@ -139,6 +141,13 @@ class RequesterTests(unittest.TestCase):
 
     def test_unreadable_user_is_refused(self):
         self.assertIn("App or bot token", module.requester_problem(None))
+
+    def test_signed_in_user_is_an_object_or_none(self):
+        for answer, expected in (({"login": "dmfenton"}, {"login": "dmfenton"}), ([], None)):
+            with mock.patch.object(module, "gh", return_value=answer):
+                self.assertEqual(module.signed_in_user(), expected)
+        with mock.patch.object(module, "gh", side_effect=subprocess.CalledProcessError(1, "gh")):
+            self.assertIsNone(module.signed_in_user())
 
 
 if __name__ == "__main__":

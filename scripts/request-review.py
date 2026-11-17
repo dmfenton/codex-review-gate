@@ -36,8 +36,8 @@ BLOB = re.compile(r"/blob/([0-9a-f]{40})/[^\s#]+#L\d+")
 ORIGIN = re.compile(r"[:/]([^/:]+/[^/]+?)(?:\.git)?/?$")
 BLOCKING = re.compile(r"\[(P0|P1)( Badge)?\]", re.IGNORECASE)
 ACTIVE = {"running", "queued", "pending", "in_progress"}
-# limit: Codex acknowledges a request within seconds and finishes a review in about two minutes
-# (observed on chef#404-#410, 2026-11-14/15); an hour without any answer means it was lost.
+# Codex acknowledges a request within seconds and finishes a review in about two minutes.
+# limit: observed on chef#404-#410 (2026-11-14/15); an hour with no answer means it was lost.
 PENDING_TIMEOUT = timedelta(hours=1)
 RETRYABLE = {"failed", "error", "errored", "cancelled", "canceled", "timed_out"}
 
@@ -236,9 +236,10 @@ def requester_problem(user: Json | None) -> str | None:
 
 def signed_in_user() -> Json | None:
     try:
-        return gh("api", "user")
+        user = gh("api", "user")
     except subprocess.CalledProcessError:
         return None
+    return user if isinstance(user, dict) else None
 
 
 def main() -> int:
