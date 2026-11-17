@@ -236,9 +236,10 @@ def requester_problem(user: Json | None) -> str | None:
 
 def signed_in_user() -> Json | None:
     try:
-        return gh("api", "user")
+        user = gh("api", "user")
     except subprocess.CalledProcessError:
         return None
+    return user if isinstance(user, dict) else None
 
 
 def main() -> int:
