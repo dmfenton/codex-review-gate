@@ -103,9 +103,10 @@ It follows the counting above: only completed Codex outcomes spend the two-round
 request Codex failed to complete can be repeated. It recognizes every completed shape listed
 above: review records, clean-review receipts, bound findings reports, and clean summaries. It
 refuses a draft, a non-`main` base, a head that already has a review, a review that is running or
-pending, a round after one that reported no P0/P1 finding (that round was final), and a third round. Consumers keep
-an identical copy at `scripts/request-review.py` and call it from their PR skill. Change it here
-first, then copy it unchanged.
+pending, a round after one that reported no P0/P1 finding (that round was final), and a third round. Its
+canonical copy lives in Platform's review kit (`tools/review-kit/files/scripts/request-review.py`
+in dmfenton/platform, with its tests), which syncs an identical copy into every consumer and into
+this repository. Change it there, never here, then copy it unchanged.
 
 While a review can still arrive, the gate waits instead of failing: it publishes `pending` and
 the job passes, so the pull request shows the review as in progress rather than red. That covers a
